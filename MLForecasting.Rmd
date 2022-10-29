@@ -1,0 +1,1126 @@
+---
+title: "Master's Thesis"
+author: "Robin Perala"
+date: "2022-09-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r libs}
+
+
+#Check files: RnD, Lab8-Garch, OptimalHedgeRatio, Ex4Part2, nnboston
+
+
+
+# library(torch)
+# library(luz) # high-level interface for torch
+# library(torchvision) # for datasets and image transformation
+# library(torchdatasets) # for datasets we are going to use
+# library(zeallot)
+
+
+library(dplyr) #Contains "mutate_if" function
+library(magrittr) #Contains pipes, e.g. %<>%
+# library(neuralnet) #For fitting neural networks
+# library(keras) #Contains "keras_model_sequential" function
+library(glmnet) #For regularized linear models (e.g. lasso and ridge)
+
+
+
+```
+
+
+
+
+```{r Compustat}
+
+#I should clean data
+#Check all variables what they are. Remove unnecessary
+#2 414 247 obs. of  408 =>
+
+#Import data
+require(data.table)
+data <- fread("Compustat.csv", nrows=1000)
+#orderedData = data[order(names(data))]
+setcolorder(data, order(names(data)))
+#orderedData = setorderv(data, order(names(data)))[]
+#orderedData = order(data)
+
+
+#Clean data
+lessThanHalfNA = apply(data, 
+                  MARGIN=2,
+                  FUN = function(x){
+                    sum(!is.na(x))>nrow(data)/2
+                    }
+                  )
+
+#First: Remove columns with over half NA
+dataFullCol = data[,lessThanHalfNA]
+
+#Second: Remove all rows with NA
+dataNoNA = na.omit(dataFullCol)
+#78 166 x 137
+
+write.csv(dataNoNA,"CleanData.csv", row.names = FALSE)
+
+
+
+#Second clean
+#cleanData = read.csv("CleanData.csv")
+#orderedCleanData = cleanData[ , order(names(cleanData))]
+
+require(data.table)
+cleanData = fread("CleanData.csv")
+setcolorder(cleanData, order(names(cleanData)))
+
+
+allNA = apply(cleanData, 
+              MARGIN=2,
+              FUN = function(x){ 
+                all(is.na(x))
+                }
+              )
+sum(allNA)
+
+#First: Remove columns with over half NA
+dataFullCol = orderedCleanData[,!allNA]
+
+#Second: Remove all rows with NA
+dataNoNA = na.omit(dataFullCol)
+```
+
+
+```{r priceData}
+
+#Import price data
+require(data.table)
+prices <- fread("CompustatPrices.csv")
+#221 835 959 x 6
+
+#data       final    preliminary
+#datadate   fdateq   pdateq
+# 20100331 20100503 20100503
+# 20100630 20100907 20100801
+# 20100930 20101105 20101105
+# 20101231 20110330 20110306
+# 20110630 20110811 20110730
+# 20111231 20120331 20120309
+#Check update code in fundamentals data
+
+nrow(cleanData[cleanData$updq==3,]) 
+#almost all data is final (update code 3, instead of 2)
+#I will use "fdateq" as a conservative approach
+
+
+#reduce data size
+removeGVKEY = prices[prices$gvkey %in% cleanData$gvkey,]
+
+#Oldest date in cleanData is 20091130S
+newPrices = removeGVKEY[removeGVKEY$datadate>=(min(cleanData$fdateq)-300),]
+
+write.csv(newPrices,"CleanPrices.csv", row.names = FALSE)
+
+```
+
+
+```{r combine}
+
+require(data.table)
+newPrices <- fread("CleanPrices.csv")
+cleanData <- fread("CleanData.csv")
+
+
+compuStat = cleanData
+#https://stackoverflow.com/questions/35046161/how-to-do-a-data-table-rolling-join
+# create an interval in the 'compuStat' datatable
+compuStat[, `:=` (start = fdateq + 1, end = fdateq + 100)]
+# create a second date in the 'prices' datatable
+newPrices[, Date2 := datadate]
+
+# set the keys for the two datatable
+setkey(compuStat, gvkey, start, end)
+setkey(newPrices, gvkey, datadate, Date2)
+
+# create a vector of columnnames which can be removed afterwards
+deletecols <- c("Date2","start","end")
+
+# perform the overlap join and remove the helper columns
+mergedData <- foverlaps(compuStat, newPrices)[, (deletecols) := NULL]
+
+
+##alternative: non-equi join
+# compuStat[, `:=` (start = fdateq - 100, end = fdateq - 1)]
+# mergedData2 = newPrices[compuStat, on = .(gvkey, datadate >= start, datadate <= end)]
+
+
+
+orderedMergedData = mergedData[order(mergedData$gvkey, mergedData$iid, -mergedData$datadate),]
+finalPriceData = orderedMergedData[!duplicated(cbind(orderedMergedData$fdateq,
+                                                orderedMergedData$gvkey,
+                                                orderedMergedData$iid)),]
+
+
+finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$iid, finalPriceData$fdateq),] #iid is "Issue ID"
+
+write.csv(finalPriceData,"finalPriceData.csv", row.names = FALSE)
+
+
+#Write into word doc:
+# StartDate >= ReleaseDate(YYYYMMDD)+1
+# && 
+# StartDate < ReleaseDate(YYYYMMDD)+100
+# Minimum Date => First date where this holds
+
+##Should be: datadate == fdateq + 1
+# mergedData = merge(cleanData, removeGVKEY, 
+#                    by.x = c("gvkey","fdateq"),
+#                    by.y = c("gvkey","datadate"))
+
+#https://stackoverflow.com/questions/16095680/merge-dataframes-on-matching-a-b-and-closest-c
+# removeGVKEY <- data.table(removeGVKEY, key = c("gvkey","datadate"))
+# cleanData <- data.table(cleanData, key = c("gvkey","fdateq"))
+# mergedData <- cleanData[removeGVKEY, roll=-1]
+
+```
+
+
+```{r calculateReturns}
+require(data.table)
+finalPriceData <- fread("finalPriceData.csv")
+
+
+ret = function(price, returnFactor, adjustmentFactor) {
+  n = length(price)
+  numerator = returnFactor[-1]*price[-1]/adjustmentFactor[-1]
+  denominator = (returnFactor[-n]*price[-n]/adjustmentFactor[-n])
+  
+  (numerator/denominator-1) * 100
+}
+
+returns = ret(price=finalPriceData$prccd, 
+                 returnFactor=finalPriceData$trfd, 
+                 adjustmentFactor=finalPriceData$ajexdi)
+
+
+returnData = cbind(returns, finalPriceData[-1,]) 
+  
+#1 is there because I already dropped the first row when calculating returns
+duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
+duplicates[1] = TRUE
+
+finalData = returnData[duplicates,]
+
+write.csv(finalData,"finalData.csv", row.names = FALSE)
+
+#We could also have done this:
+#a = finalData[, ret(prccd, trfd, ajexdi), by = gvkey]
+
+```
+
+
+
+
+
+```{r Descriptives}
+
+colnames(cleanData)[122]
+numsData = cleanData[21:105]
+
+
+#Descriptive statistics
+library(moments)
+Skewness = c(skewness(numsData, na.rm=T))
+Kurtosis = c(kurtosis(numsData, na.rm=T))
+kS = round(cbind(Skewness, Kurtosis), 0)
+write.csv(kS, "kurtSkew.csv")
+
+
+
+
+library(stargazer)
+stargazer(numsData,
+          type = "text",
+          out = "numsDesc.html",
+          title = "Descriptive statistics",
+          style = "default", #"aer", "qje"
+          flip = F,
+          digits = 0,
+          digits.extra = 0,
+          median=T,
+          iqr=T#,
+          #add.lines = list(Skewness, Kurtosis)
+          )
+
+
+groupData = cleanData[,123:134]
+countryIndustry = table(cleanData[,c("fic", "gsector")]) #GICS industry code
+write.csv(countryIndustry, file = "countryIndustry.csv")
+
+
+
+#How many companies? 8450
+dim(table(cleanData[,c("gvkey")]))
+
+
+```
+
+
+
+
+# ```{r TrainTestSplit}
+#
+# # library(dplyr) #Contains "mutate_if" function
+# # library(magrittr) #Contains pipes, e.g. %<>%
+# # X2 = X
+# # X2 %<>% mutate_if(is.factor, as.numeric)
+# # X3 <- as.matrix(X2)
+#
+# require(data.table)
+# finalData <- fread("finalData.csv")
+# #finalData2 <- fread("finalData2.csv")
+#
+#
+# orderedData = finalData[order(-finalData$fdateq, finalData$gvkey, finalData$iid, ),]
+# testSize = ceiling(nrow(finalData)*0.2)
+# testStartDate = orderedData$fdateq[testSize]
+# test = orderedData[orderedData$fdateq>=testStartDate,]
+#
+# #Training-Validation split
+# trainValidation = orderedData[orderedData$fdateq<testStartDate,]
+#
+# # n <- nrow(trainValidation)
+# # nr <- 10
+# # tenFold = split(trainValidation, rep(1:ceiling(nr/n), each=n, length.out=nr))
+#
+# #Validation set (50-50 split)
+# # validation=sample(c(TRUE, FALSE), nrow(X), rep=TRUE)
+# # trainTest = !validation
+#
+# foldSize <- nrow(trainValidation)/10
+# a <- seq_along(trainValidation$fdateq)
+# tenFoldDates <- split(trainValidation$fdateq, ceiling(a/foldSize))
+#
+# tenFoldDates = unlist(tenFoldDates)
+# tenFoldEndDates = lapply(tenFoldDates, function(l) l[[1]])
+# tenFoldEndDates = rev(unlist(tenFoldEndDates))
+#
+#
+#
+# dataLeft = trainValidation
+# tenFold = list()
+# for(n in 1:10){
+#   fold = dataLeft[dataLeft$fdateq <= tenFoldEndDates[n]]
+#   tenFold[[n]] = fold
+#   dataLeft = dataLeft[dataLeft$fdateq > tenFoldEndDates[n]]
+# }
+#
+#
+#
+# ```
+
+
+
+
+# ```{r TrainTestSplitSecondTry_QuarterlySplit}
+#
+#
+#
+# require(data.table)
+# finalData <- fread("finalData.csv")
+# #finalData2 <- fread("finalData2.csv")
+#
+#
+# orderedData = finalData[order(-finalData$fdateq, finalData$gvkey, finalData$iid, ),]
+# testSize = ceiling(nrow(finalData)*0.2)
+# testStartDate = orderedData$fdateq[testSize]
+# test = orderedData[orderedData$fdateq>=testStartDate,]
+#
+# #Training-Validation split
+# trainValidation = orderedData[orderedData$fdateq<testStartDate,]
+#
+#
+# dataLeft = trainValidation
+# quarters = list()
+#
+# startDate = min(trainValidation$fdateq)
+# startYear = startDate[1:4]
+# floor(date/100) * 100
+#
+# quarter = startQuarter
+# endDate = max(trainValidation$fdateq)
+#
+# for(n in 1:10){
+#   fold = dataLeft[dataLeft$fdateq <= tenFoldEndDates[n]]
+#   tenFold[[n]] = fold
+#   dataLeft = dataLeft[dataLeft$fdateq > tenFoldEndDates[n]]
+#   quarter = quarter + 300
+# }
+#
+#
+#
+#
+#
+#
+# ```
+
+```{r factorizing and removing extra variables}
+
+require(data.table)
+finalData <- fread("finalData.csv")
+
+#prirow is the "primary issue tag". Only use primary issue
+finalData=finalData[finalData$iid==finalData$prirow,]
+
+#factorizing
+YXfactor = finalData
+factorCols = c("gvkey", "curcdq", "exchg", "fic", "city", "fyrc",
+        "ggroup", "gind", "gsector", 
+        "gsubind", "idbflag", "loc", 
+        "naics", "sic")
+
+YXfactor[,"gvkey"] = apply(YXfactor[,"gvkey"], MARGIN = 2, factor)
+YXfactor[,"sic"] = apply(YXfactor[,"sic"], MARGIN = 2, factor)
+YXfactor[,"naics"] = apply(YXfactor[,"naics"], MARGIN = 2, factor)
+YXfactor[,"loc"] = apply(YXfactor[,"loc"], MARGIN = 2, factor)
+YXfactor[,"idbflag"] = apply(YXfactor[,"idbflag"], MARGIN = 2, factor)
+YXfactor[,"gsubind"] = apply(YXfactor[,"gsubind"], MARGIN = 2, factor)
+YXfactor[,"gsector"] = apply(YXfactor[,"gsector"], MARGIN = 2, factor)
+YXfactor[,"gind"] = apply(YXfactor[,"gind"], MARGIN = 2, factor)
+YXfactor[,"ggroup"] = apply(YXfactor[,"ggroup"], MARGIN = 2, factor)
+YXfactor[,"fyrc"] = apply(YXfactor[,"fyrc"], MARGIN = 2, factor)
+YXfactor[,"city"] = apply(YXfactor[,"city"], MARGIN = 2, factor)
+YXfactor[,"fic"] = apply(YXfactor[,"fic"], MARGIN = 2, factor)
+YXfactor[,"exchg"] = apply(YXfactor[,"exchg"], MARGIN = 2, factor)
+YXfactor[,"curcdq"] = apply(YXfactor[,"curcdq"], MARGIN = 2, factor)
+
+# for(n in factorCols){
+#   YXfactor[,..n] = apply(YXfactor[,..n], MARGIN = 2, factor)
+# }
+
+
+#Removing Unncecessary variables 
+variableNames = c("returns", "gvkey", "fdateq", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
+
+#What is i.datadate???
+#a = finalData[,c("datadate","i.datadate")]
+
+
+#YX = lapply(YXfactor, function(x){x[, ..variableNames]})
+#YX = lapply(YX, function(x){na.omit(x)})
+YX = YXfactor[, ..variableNames]
+
+
+#removeMissingCalendarData. I could probably manually add these three instead. A simple script for adding
+#which(finalData$datacqtr=="")
+#finalData[c(12721, 68453, 71789),]
+YX=YX[!YX$datacqtr=="",]
+
+#Trash??
+#a = factor(YX[1]$'2009Q4'$sic)
+
+
+
+```
+
+
+```{r TrainTestSplit_QuarterlySplit}
+
+finalData = YX
+
+#sorting
+orderedData = finalData[order(-finalData$fdateq, finalData$gvkey),]
+
+quarterGroups = split(orderedData, orderedData$datacqtr)
+
+splitPoint = length(quarterGroups) - 5
+testSize = splitPoint:length(quarterGroups)
+trainValidationSize = 1:(splitPoint-1)
+
+testSet = quarterGroups[testSize]
+trainValidation =  quarterGroups[trainValidationSize]
+
+
+#Checking if the data periodization makes sense
+# for(n in testSet){
+#   print(c(min(n$fdateq), max(n$fdateq)))
+# }
+# 
+# for(n in trainValidation){
+#   print(c(min(n$fdateq), max(n$fdateq)))
+# }
+# 
+# 
+# #Minimum dates look approximately fine. Maximum dates on the other hand...
+# which(trainValidation$'2009Q4'$fdateq == max(trainValidation$'2009Q4'$fdateq))
+# 
+# #Check this for the initial dataset. Is this an error?
+# finalData[finalData$gvkey==285237,]
+
+```
+
+
+```{r CVfunction}
+
+
+
+
+```
+
+```{r removeRedVariables}
+
+
+```
+
+
+```{r Pooling}
+
+drop = c("datacqtr", "fdateq")
+
+sparseTestSet = lapply(testSet, function(x) {
+  Matrix::sparse.model.matrix(returns ~ ., x[,!..drop])
+})
+
+sparseTrainValidation = lapply(trainValidation, function(x) {
+  Matrix::sparse.model.matrix(returns ~ ., x[, !..drop])
+})
+
+
+
+# sparseYX = Matrix::sparse.model.matrix(returns ~ ., YX)
+# Y = YX$returns
+
+
+YX = sparseTrainValidation
+CVsize = round(length(YX)/2):(length(YX)-1)
+CVsize = (length(YX)-2):(length(YX)-1)
+
+
+
+YX = lapply(trainValidation, function(x) x[, !..drop])
+
+trainXPools = list()
+validXPools = list()
+
+trainYPools = list()
+validYPools = list()
+for (n in CVsize) {
+  #Create training set
+  set = YX[1:n]
+  pooled = do.call(rbind, set)
+  trainX = Matrix::sparse.model.matrix(returns ~ ., pooled)
+  #trainXRegular = Matrix::model.matrix(returns ~ ., pooled)
+  trainY = pooled$returns
+  
+  #Created validation set
+  valid = YX[n + 1][[1]]
+  validX = Matrix::sparse.model.matrix(returns ~ ., valid)
+  #validXRegular = Matrix::model.matrix(returns ~ ., valid)
+  validY = valid$returns
+  
+  #remove columns that arent in both data sets
+  trainCols = trainX@Dimnames[[2]]
+  validCols = validX@Dimnames[[2]]
+  trainX = trainX[,  trainCols %in% validCols]
+  validX = validX[,  validCols %in% trainCols]
+  
+  trainXPools = append(trainXPools, list(trainX))
+  trainYPools = append(trainYPools, list(trainY))
+  
+  validXPools = append(validXPools, list(validX))
+  validYPools = append(validYPools, list(valid$returns))
+}
+
+
+
+
+# sparseTrainPools = lapply(trainPools, function(x) {
+#   Matrix::sparse.model.matrix(returns ~ ., x)
+# })
+
+
+
+
+# for (n in CVsize) {
+#   set = YX[1:n]
+#   pooled = do.call(rbind, set)
+#   
+#   #Create training set
+#   trainX = Matrix::sparse.model.matrix(returns ~ ., pooled)
+#   trainY = pooled$returns
+#   
+#   #Created validation set
+#   valid = YX[n + 1][[1]]
+#   validX = sparse.model.matrix(returns ~ ., valid)
+#   validY = valid$returns
+#   
+#   #remove columns that arent in both data sets
+#   validCols = validX@Dimnames[[2]]
+#   trainCols = trainX@Dimnames[[2]]
+#   trainX = trainX[,  trainCols %in% validCols]
+#   validX = validX[,  validCols %in% trainCols]
+# }
+
+
+
+
+```
+
+```{r OLS}
+
+# OLSData = do.call(rbind, trainValidation)[, -c("fdateq")]
+# 
+# #check duplicates
+# unique = c("gvkey", "datacqtr")
+# #dups = OLSData[duplicated(OLSData[,..unique])]
+# OLSDataUnique = OLSData[!duplicated(OLSData[,..unique])]
+# 
+# #n = names(OLSPanel)
+# n = names(Filter(is.numeric, OLSDataUnique))
+# exclude = c("returns", "gvkey", "datacqtr")
+# f <- as.formula(paste("returns ~", paste(n[!n %in% exclude], collapse = " + ")))
+# 
+# OLSPanel = plm::pdata.frame(OLSDataUnique, index = c("gvkey", "datacqtr"))
+# OLSmodel2 = plm::plm(f, effect="twoways", model= "within", data=OLSPanel)
+# #OLSsummary = summary(OLSmodel2) #computationally singular -> Because of multicollinearity. No issue; just ignore the message
+# #OLSsummary$r.squared
+# 
+# 
+# 
+# 
+# 
+# OLSError = c()
+# for (n in 1:validationSize) {
+#   trainX = trainXPools[[n]]
+#   trainY = trainYPools[[n]]
+#   validX = validXPools[[n]]
+#   validY = validYPools[[n]]
+#   
+#   OLSmodel3 = glmnet(
+#     x = trainX,
+#     y = trainY,
+#     standardize = TRUE,
+#     lambda = 0
+#   )
+#   
+#   OLSpred = predict(OLSmodel3, newx = validX)
+#   OLSMSE = mean((OLSpred - validY) ^ 2)
+#   OLSMAE =  mean(abs(OLSpred - validY))
+#   
+#   OLSError = rbind(OLSError, c("OLSMSE" = lassoMSE, "OLSMAE" = lassoMAE))
+# }
+# meanCV = apply(OLSError, 2, mean)
+# meanCV
+
+
+
+```
+
+
+```{r LassoRidge}
+
+library(glmnet)
+#Use function glmnet (from library glmnet) to perform linear regression with Lasso regularization
+#alpha=1 is lasso.
+
+
+
+validationSize = length(validXPools)
+CVfunction = function(lambda, alpha) {
+  lassoError = c()
+  for (n in 1:validationSize) {
+    trainX = trainXPools[[n]]
+    trainY = trainYPools[[n]]
+    validX = validXPools[[n]]
+    validY = validYPools[[n]]
+    
+    lassoModel = glmnet(
+      x = trainX,
+      y = trainY,
+      alpha = alpha,
+      standardize = TRUE,
+      lambda = lambda
+    )
+
+    lassoPred = predict(lassoModel, newx = validX)
+    lassoMSE = mean((lassoPred - validY) ^ 2)
+    lassoMAE = mean(abs(lassoPred - validY))
+    
+    lassoError = rbind(lassoError, c("lassoMSE" = lassoMSE, "lassoMAE" = lassoMAE))
+  }
+  meanCV = apply(lassoError, 2, mean)
+  meanCV
+}
+
+
+grid = c(10^seq(3,-10, length=5), 0)
+
+
+MSEMatrix = c()
+for (alpha in 1:2) {
+  for (lambda in grid) {
+    lambdaCV = CVfunction(lambda)
+    MSEMatrix = rbind(MSEMatrix,
+                      c("lambda" = lambda, "alpha" = alpha, lambdaCV))
+  }
+}
+MSEMatrix
+
+
+```
+
+
+
+
+
+
+```{r PCR}
+
+# library(pls)
+# #PCR Regression using function pcr (part of pls library)
+# PCRfit=pcr(returns~., data=USData, scale=TRUE, subset=train, validation ="CV")
+# 
+# 
+# 
+# CVfunction = function(lambda, alpha) {
+#   errorMatrix = c()
+#   for (n in 1:validationSize) {
+#     trainX = trainXPools[[n]]
+#     trainY = trainYPools[[n]]
+#     validX = validXPools[[n]]
+#     validY = validYPools[[n]]
+#     
+#     train = cbind(trainX, trainY)
+#     
+#     PCRfit=pcr(returns~., data=train, scale=TRUE)
+# 
+#     lassoPred = predict(lassoModel, newx = validX)
+#     lassoMSE = mean((lassoPred - validY) ^ 2)
+#     lassoMAE = mean(abs(lassoPred - validY))
+#     
+#     lassoError = rbind(lassoError, c("lassoMSE" = lassoMSE, "lassoMAE" = lassoMAE))
+#   }
+#   meanCV = apply(lassoError, 2, mean)
+#   meanCV
+# }
+# 
+# pcrCV = CVfunction(lambda)
+# 
+# 
+# 
+# 
+# 
+# #Validation plot
+# validationplot(PCRfit, val.type="MSEP")
+# 
+# #Scree plotting
+# PVE=PCRfit$Xvar/PCRfit$Xtotvar
+# plot(PVE, xlab="Principal Component", ylab="Proportion of Variance Explained", 
+#      ylim=c(0,1), type="b")
+# plot(cumsum(PVE), xlab="Principal Component", ylab="Cumulative Proportion of Variance Explained", 
+#      ylim=c(0,1), type="b")
+
+
+```
+
+
+
+
+```{r Decision Trees}
+library(haven) #For importing Stata data
+library(tree) #For fitting trees
+library(randomForest) #For bagging and randomforests
+library(gbm) #For boosting
+
+
+# #Fit a tree using function "tree" (in library "tree")
+# treeROA = tree(roa_w~. , USData, subset=train)
+# summary(treeROA)
+# #treeROA
+# 
+# #Plot
+# plot(treeROA); text(treeROA, pretty=0, cex=0.7, srt=25)
+# 
+# #MSE
+# yhat=predict(treeROA, newdata=USData[-train,])
+# ROAtest=USData[-train, "roa_w"]
+# plot(yhat, ROAtest$roa_w, ylab = "roa_w")
+# abline(0,1)
+# mean((yhat-ROAtest$roa_w)^2)
+
+
+
+
+
+
+
+
+
+
+
+
+#Bagging
+library(randomForest)
+CVsize = (length(YX)-2):(length(YX)-1)
+
+treefunction = function(p, nTree, nodes) {
+  errorMatrix = c()
+  for (n in CVsize) {
+    set = YX[1:n]
+    pooled = do.call(rbind, set)
+    # trainX = stats::model.matrix(returns ~ ., pooled)
+    # trainY = pooled$returns
+    # 
+    # #Created validation set
+    valid = YX[n + 1][[1]]
+    #validX = stats::model.matrix(returns ~ ., valid)
+    validX = valid[,!"returns"]
+    validY = valid$returns
+    
+    
+    #remove columns that arent in both data sets
+    trainCols = names(pooled)
+    validCols = names(valid)
+    pooled = pooled[,  (trainCols %in% validCols), with=FALSE]
+
+    validXCols = names(validX)
+    validX = validX[,  (validXCols %in% trainCols), with=FALSE]
+
+    #remove columns that arent in both data sets
+    # trainCols = trainX@Dimnames[[2]]
+    # validCols = validX@Dimnames[[2]]
+    # trainX = trainX[,  trainCols %in% validCols]
+    # validX = validX[,  validCols %in% trainCols]
+    
+    # train = cbind(trainX, "returns"=trainY)
+    # train = as.data.table(as.matrix(train))
+    
+    model = randomForest(
+      returns ~ .,
+      data = pooled,
+      mtry = p,
+      ntree = nTree,
+      maxnodes = nodes,
+      importance = TRUE
+    )
+    
+    pred = predict(model, newx = validX) #something is not working here nrows(pred) is the same as nrows(pooled)
+    MSE = mean((pred - validY) ^ 2)
+    MAE = mean(abs(pred - validY))
+    
+    errorMatrix = rbind(errorMatrix, c("MSE" = MSE, "MAE" = MAE))
+  }
+  meanCV = apply(errorMatrix, 2, mean)
+  meanCV
+}
+
+
+
+MSEMatrix = c()
+numOfPreds = c(ncol(pooled)/3, ncol(pooled)-1)
+nTrees = c(10, 15)
+maxNodes = c(2, 3)
+for (p in numOfPreds) {
+  for (nTree in nTrees) {
+    for (nodes in maxNodes) {
+      CV = treefunction(p, nTree, nodes)
+      MSEMatrix = rbind(MSEMatrix,
+                        c(
+                          "predictors" = p,
+                          "trees" = nTree,
+                          "nodes" = nodes,
+                          CV
+                        ))
+    }
+  }
+}
+MSEMatrix
+
+
+
+
+
+# #Bagging using the function randomForest,
+# #inside the randomForest library. When mtry is for all variables, it is bagging. 
+# bagROA = randomForest(roa_w~., USData, subset=train, mtry=ncol(USData)-1, importance =TRUE)
+# bagROA
+# plot(bagROA)
+# 
+# #MSE
+# yhat=predict(bagROA, newdata=USData[-train,])
+# ROAtest=USData[-train, "roa_w"]
+# plot(yhat, ROAtest$roa_w)
+# abline(0,1)
+# mean((yhat-ROAtest$roa_w)^2)
+
+
+
+
+
+
+
+
+
+
+# #Random forests
+# 
+# set.seed(1)
+# #Fit a random forest using the function randomForest,
+# #inside the randomForest library. When mtry is less than
+# #than all variables in the data, it is a random forests model
+# forestROA = randomForest(roa_w~., USData, subset=train, importance = TRUE)
+# 
+# #Should be done on several different mtry
+# #sqrt(ncol(USData))
+# #ncol(USData)/3
+# 
+# forestROA
+# plot(forestROA)
+# 
+# importance(forestROA)
+# varImpPlot(forestROA)
+# 
+# #MSE
+# yhat=predict(forestROA, newdata=USData[-train,])
+# ROAtest=USData[-train, "roa_w"]
+# plot(yhat, ROAtest$roa_w)
+# abline(0,1)
+# mean((yhat-ROAtest$roa_w)^2)
+
+
+
+
+
+
+
+# #Boosting
+# 
+# set.seed(1)
+# #Boosting using the "gbm" function inside the "gbm" library
+# boostROA = gbm(roa_w~., USData[train,], distribution="gaussian", n.trees=500, interaction.depth=4, shrinkage = 0.1)
+# #all or only training set? cv.folds? check help(gbm)
+# #We use cross-validation to select B.
+# 
+# 
+# boostROA
+# summary(boostROA)
+# plot(boostROA, i="profit_margin_w"); plot(boostROA, i="ebitda_w")
+# 
+# #MSE
+# yhat=predict(boostROA, newdata=USData[-train,])
+# ROAtest=USData[-train, "roa_w"]
+# plot(yhat, ROAtest$roa_w)
+# abline(0,1)
+# mean((yhat-ROAtest$roa_w)^2)
+
+
+```
+
+
+
+
+
+
+
+
+```{r NeuralNetwork}
+
+
+NNfunction = function(layers, hidUnits, actvFunc, dropout, l1, l2, epochs) {
+  lassoError = c()
+  
+  # #Model Creation
+  # library(keras)
+  inputSize = ncol(trainXPools[[1]])
+  model <- keras_model_sequential()
+  model %>%
+    layer_dense(units = hidUnits,
+                activation = 'actvFunc',
+                input_shape = inputSize) %>%
+    layer_activity_regularization(l1 = l1, l2 = l2) %>%
+    layer_dropout(rate = dropout)  %>%
+    layer_dense(units = 1)
+
+  #Model Compilation
+  model %>% compile(loss = 'mse',
+                    optimizer = 'rmsprop',
+                    metrics = 'mae')
+
+  readline()
+  
+  
+  # library(torch)
+  # library(luz) # high-level interface for torch
+  #torch_manual_seed(13)
+  modnn <- nn_module(
+    initialize = function(inputSize) {
+      self$hidden <- nn_linear(inputSize, hidUnits)
+      self$activation <- nn_relu()
+      self$dropout <- nn_dropout(dropout)
+      self$output <- nn_linear(hidUnits, 1)
+    },
+    forward = function(x) {
+      x %>%
+        self$hidden() %>%
+        self$activation() %>%
+        self$dropout() %>%
+        self$output()
+    }
+  )
+  
+  modnn <- modnn %>%
+    setup(
+      loss = nn_mse_loss(),
+      optimizer = optim_rmsprop,
+      metrics = list(luz_metric_mae())
+    ) %>%
+    set_hparams(input_size = ncol(x))
+  
+  readline()
+  
+  
+  for(n in 1:validationSize) {
+    trainX = trainXPools[[n]]
+    trainY = trainYPools[[n]]
+    validX = validXPools[[n]]
+    validY = validYPools[[n]]
+    
+    # #Model Fitting
+    # mymodel <- model %>%
+    #   fit(
+    #     trainX,
+    #     trainY,
+    #     epochs = epochs,
+    #     batch_size = 3, #32 default. Add as an extra hyper-parameter
+    #     validation_data = list(validX, validY)
+    #   )
+    # 
+    # # #Prediction
+    # # model %>% evaluate(validX, validY)
+    # # pred <- model %>% predict(validX)
+    # 
+    # 
+    # # #Scatter Plot Original vs Predicted
+    # # plot(testtarget, pred)
+    # #
+    # # #Plot model error for each epoch
+    # # plot(mymodel)
+    
+    x <- trainX %>% scale()
+    
+    fitted <- modnn %>%
+      fit(
+        data = list(trainX, matrix(trainY, ncol = 1)),
+        valid_data = list(validX, matrix(validY, ncol = 1)),
+        epochs = epochs
+      )
+    
+    
+    #MSE and MAE (The same ones as above)
+    pred = predict(model, newx = validX)
+    MSE = mean((validY - pred) ^ 2)
+    MAE = mean(abs(validY - pred))
+    
+    errorMatrix = rbind(errorMatrix, c("MSE" = MSE, "MAE" = MAE))
+  }
+  meanCV = apply(lassoError, 2, mean)
+  meanCV
+}
+
+
+
+
+#Hyper-Parameters
+layers = c(1, 2, 3, 4)
+hidUnits = c(1, 2, 3)
+actvFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
+dropout = c(0.5, 0)
+regGrid = c(10^seq(3,-10, length=4), 0)
+epochs = c(3, 5) #Just choose best model. => Run for 5 epochs but if third epoch is better, choose it
+
+hyperParams = expand.grid(
+  "layers" = layers,
+  "hidden units" = hidUnits,
+  "activationFunc" = actvFunc,
+  "dropout" = dropout,
+  "l1" = regGrid,
+  "l2" = regGrid,
+  "epochs" = epochs
+)
+
+library(tensorflow)
+library(keras)
+#library(torch)
+#library(luz)
+
+MSEMatrix = c()
+for(HP in hyperParams) {
+  CV = NNfunction(HP)
+  MSEMatrix = rbind(MSEMatrix, c(HP, CV))
+}
+MSEMatrix
+
+```
+
+
+
+
+```{r RNN}
+model <- keras_model_sequential() 
+model %>% 
+         layer_embedding(input_dim = 500, output_dim = 32) %>%
+         layer_simple_rnn(units = 32) %>%  
+         layer_dense(units = 1, activation = "sigmoid")
+
+```
+
+
+```{r LSTM}
+
+model <- keras_model_sequential() 
+model %>% 
+         layer_embedding(input_dim = 500, output_dim = 32) %>%
+         layer_lstm(units = 32) %>%  
+         layer_dense(units = 1, activation = "sigmoid")
+
+```
+
+
+```{r ForecastPlot}
+
+
+
+#dccForecast = dccforecast(triGarch, n.roll = triForecastLength)
+
+```
+
+
+
+
+```{r OutputSummary}
+
+#For nicer output (printing)
+comparisonMatrix = matrix(c(NN1MSE, NN1MAE, 
+                            lassoMSE, lassoMAE), 
+                          ncol=2,
+                          byrow=TRUE)
+comparisonMatrix = round(comparisonMatrix, 4)
+
+colnames(comparisonMatrix) = c("MSE", "MAE")
+rownames(comparisonMatrix) = c("Neural network with one hidden layer", 
+                               "Linear regression with Lasso regularisation")
+print(comparisonMatrix)
+
+
+```
+
+
+
+
