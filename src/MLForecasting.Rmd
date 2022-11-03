@@ -926,143 +926,149 @@ MSEMatrix
 
 
 
+```{r NNdata}
+
+library(data.table)
+drop = c("datacqtr", "fdateq")
+YXNN = lapply(trainValidation, function(x) x[, !..drop])
+
+trainXNN = list()
+trainYNN = list()
+validXNN = list()
+validYNN = list()
+
+for (n in CVsize) {
+  #Create training set
+  set = YXNN[1:n]
+  pooled = do.call(rbind, set)
+  pooled = Filter(is.numeric, pooled)
+  trainX = stats::model.matrix(returns ~ ., pooled)
+  trainX[,-1] = apply(trainX[,-1], MARGIN = 2, scale)
+  trainY = pooled$returns
+  #trainY = as.matrix(pooled[, "returns"])
+
+  
+  #Created validation set
+  valid = YXNN[n + 1][[1]]
+  valid = Filter(is.numeric, valid)
+  validX = stats::model.matrix(returns ~ ., valid)
+  validX[,-1] = apply(validX[,-1], MARGIN = 2, scale)
+  validY = valid$returns
+  #validY = as.matrix(valid[, "returns"])
+  
+  #remove columns that arent in both data sets
+  trainCols = colnames(trainX)
+  validCols = colnames(validX)
+  trainX = trainX[,  trainCols %in% validCols]
+  validX = validX[,  validCols %in% trainCols]
+  
+  trainXNN = append(trainXNN, list(trainX))
+  trainYNN = append(trainYNN, list(trainY))
+  validXNN = append(validXNN, list(validX))
+  validYNN = append(validYNN, list(validY))
+}
+
+```
 
 
 
 
 ```{r NeuralNetwork}
 
+library(torch)
+library(luz) #High-level interface for torch
+library(magrittr) #Contains pipes, e.g. %<>%
 
-NNfunction = function(layers, hidUnits, actvFunc, dropout, l1, l2, epochs) {
-  lassoError = c()
+if(cuda_is_available()){
+  device = torch_device("cuda")
+} else{
+  device = torch_device("cpu")
+}
   
-  # #Model Creation
-  # library(keras)
-  inputSize = ncol(trainXPools[[1]])
-  model <- keras_model_sequential()
-  model %>%
-    layer_dense(units = hidUnits,
-                activation = 'actvFunc',
-                input_shape = inputSize) %>%
-    layer_activity_regularization(l1 = l1, l2 = l2) %>%
-    layer_dropout(rate = dropout)  %>%
-    layer_dense(units = 1)
 
-  #Model Compilation
-  model %>% compile(loss = 'mse',
-                    optimizer = 'rmsprop',
-                    metrics = 'mae')
-
-  readline()
+NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
+  errorMatrix = c()
   
-  
-  # library(torch)
-  # library(luz) # high-level interface for torch
-  #torch_manual_seed(13)
-  modnn <- nn_module(
-    initialize = function(inputSize) {
-      self$hidden <- nn_linear(inputSize, hidUnits)
-      self$activation <- nn_relu()
-      self$dropout <- nn_dropout(dropout)
-      self$output <- nn_linear(hidUnits, 1)
-    },
-    forward = function(x) {
-      x %>%
-        self$hidden() %>%
-        self$activation() %>%
-        self$dropout() %>%
-        self$output()
-    }
-  )
+  if(type=="LSTM") {
+    source("LSTM.R")
+  } else  {
+    source("FeedForwardNN.R")
+  }
   
   modnn <- modnn %>%
-    setup(
-      loss = nn_mse_loss(),
-      optimizer = optim_rmsprop,
-      metrics = list(luz_metric_mae())
-    ) %>%
-    set_hparams(input_size = ncol(x))
-  
-  readline()
+  setup(
+    loss = nn_mse_loss(),
+    optimizer = optim_rmsprop,
+    metrics = list(luz_metric_mae())
+  ) %>%
+  set_hparams(input_size = 86, layers=layers, type=type) #3130 #inputSize
   
   
   for(n in 1:validationSize) {
-    trainX = trainXPools[[n]]
-    trainY = trainYPools[[n]]
-    validX = validXPools[[n]]
-    validY = validYPools[[n]]
+    trainX = trainXNN[[n]]
+    trainY = trainYNN[[n]]
+    validX = validXNN[[n]]
+    validY = validYNN[[n]]
     
-    # #Model Fitting
-    # mymodel <- model %>%
-    #   fit(
-    #     trainX,
-    #     trainY,
-    #     epochs = epochs,
-    #     batch_size = 3, #32 default. Add as an extra hyper-parameter
-    #     validation_data = list(validX, validY)
-    #   )
-    # 
-    # # #Prediction
-    # # model %>% evaluate(validX, validY)
-    # # pred <- model %>% predict(validX)
-    # 
-    # 
-    # # #Scatter Plot Original vs Predicted
-    # # plot(testtarget, pred)
-    # #
-    # # #Plot model error for each epoch
-    # # plot(mymodel)
     
-    x <- trainX %>% scale()
+    #Model Fitting
     
+    #batch number seems to automatically be 32. 
+    #dataloader_options: Options used when creating a dataloader. See torch::dataloader().
+    #shuffle=TRUE by default for the training data and batch_size=32 by default.
+    #It will error if not NULL and data is already a dataloader.
     fitted <- modnn %>%
       fit(
-        data = list(trainX, matrix(trainY, ncol = 1)),
-        valid_data = list(validX, matrix(validY, ncol = 1)),
-        epochs = epochs
+        data = list(trainX, trainY),
+        valid_data = list(validX, validY),
+        epochs = epo
       )
     
+    #plot(fitted)
+    #fitted
     
     #MSE and MAE (The same ones as above)
-    pred = predict(model, newx = validX)
+    pred = predict(fitted, validX)
     MSE = mean((validY - pred) ^ 2)
     MAE = mean(abs(validY - pred))
+    #plot(validY, pred) 
+    #torch_round(pred, 2)
+    #pred$round()
     
-    errorMatrix = rbind(errorMatrix, c("MSE" = MSE, "MAE" = MAE))
+    errorMatrix = rbind(errorMatrix, c("MSE" = MSE$item(), "MAE" = MAE$item()))
   }
-  meanCV = apply(lassoError, 2, mean)
+  meanCV = apply(errorMatrix, 2, mean)
   meanCV
 }
 
 
 
-
 #Hyper-Parameters
-layers = c(1, 2, 3, 4)
-hidUnits = c(1, 2, 3)
-actvFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
-dropout = c(0.5, 0)
-regGrid = c(10^seq(3,-10, length=4), 0)
-epochs = c(3, 5) #Just choose best model. => Run for 5 epochs but if third epoch is better, choose it
+modelType = c("forward", "LSTM")
+hiddenLayers = c(2, 3)
+hiddenUnits = c(2, 3)
+#activationFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
+dropOut = c(0.5, 0)
+#regGrid = c(10^seq(3,-10, length=4), 0)
+epochs = 1 #Just choose best model. => Run for 5 epochs, but if 3rd epoch is better, choose it
+
 
 hyperParams = expand.grid(
-  "layers" = layers,
-  "hidden units" = hidUnits,
-  "activationFunc" = actvFunc,
-  "dropout" = dropout,
-  "l1" = regGrid,
-  "l2" = regGrid,
-  "epochs" = epochs
+  "type" = modelType,
+  "layers" = hiddenLayers,
+  "hidUnits" = hiddenUnits,
+  "dropout" = dropOut,
+  "epo" = epochs
+  # "activationFunc" = activationFunc,
+  # "l1" = regGrid,
+  # "l2" = regGrid
 )
 
-library(tensorflow)
-library(keras)
-#library(torch)
-#library(luz)
-
+#validationSize = length(validXPools)
 MSEMatrix = c()
-for(HP in hyperParams) {
-  CV = NNfunction(HP)
+for(n in 1:nrow(hyperParams)) {
+  HP = as.list(hyperParams[n,])
+  CV = do.call(NNfunction, HP)
   MSEMatrix = rbind(MSEMatrix, c(HP, CV))
 }
 MSEMatrix
@@ -1070,9 +1076,62 @@ MSEMatrix
 ```
 
 
+```{r Keras}
 
 
-```{r RNN}
+# library(tensorflow)
+# library(keras)
+
+# # #Model Creation
+# # library(keras)
+# inputSize = ncol(trainXPools[[1]])
+# model <- keras_model_sequential()
+# model %>%
+#   layer_dense(units = hidUnits,
+#               activation = 'actvFunc',
+#               input_shape = inputSize) %>%
+#   layer_activity_regularization(l1 = l1, l2 = l2) %>%
+#   layer_dropout(rate = dropout)  %>%
+#   layer_dense(units = 1)
+#
+# #Model Compilation
+# model %>% compile(loss = 'mse',
+#                   optimizer = 'rmsprop',
+#                   metrics = 'mae')
+#
+# readline()
+
+
+
+
+# #Model Fitting
+# mymodel <- model %>%
+#   fit(
+#     trainX,
+#     trainY,
+#     epochs = epochs,
+#     batch_size = 3, #32 default. Add as an extra hyper-parameter
+#     validation_data = list(validX, validY)
+#   )
+#
+# # #Prediction
+# # model %>% evaluate(validX, validY)
+# # pred <- model %>% predict(validX)
+#
+#
+# # #Scatter Plot Original vs Predicted
+# # plot(testtarget, pred)
+# #
+# # #Plot model error for each epoch
+# # plot(mymodel)
+
+
+```
+
+
+```{r RNN Keras}
+
+
 model <- keras_model_sequential() 
 model %>% 
          layer_embedding(input_dim = 500, output_dim = 32) %>%
@@ -1082,7 +1141,7 @@ model %>%
 ```
 
 
-```{r LSTM}
+```{r LSTM Keras}
 
 model <- keras_model_sequential() 
 model %>% 
