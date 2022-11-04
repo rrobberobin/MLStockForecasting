@@ -937,6 +937,7 @@ trainYNN = list()
 validXNN = list()
 validYNN = list()
 
+CVsize = 5:6
 for (n in CVsize) {
   #Create training set
   set = YXNN[1:n]
@@ -985,23 +986,31 @@ if(cuda_is_available()){
   device = torch_device("cpu")
 }
   
+#torch_manual_seed(13)
 
 NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
   errorMatrix = c()
   
-  if(type=="LSTM") {
-    source("LSTM.R")
-  } else  {
-    source("FeedForwardNN.R")
-  }
+  if (type == "LSTM" || type == "GRU")
+    source("src/LSTM.R")
+  else if (type == "Forward")
+    source("src/FeedForwardNN.R")
+  else
+    source("src/Linear.R")
   
   modnn <- modnn %>%
   setup(
     loss = nn_mse_loss(),
-    optimizer = optim_rmsprop,
+    optimizer = optim_rmsprop, #optim_sgd #optim_rmsprop
     metrics = list(luz_metric_mae())
   ) %>%
-  set_hparams(input_size = 86, layers=layers, type=type) #3130 #inputSize
+    set_hparams(
+      input_size = 86,
+      layers = layers,
+      type = type,
+      hidUnits = hidUnits,
+      dropout=dropout
+    ) #3130 #inputSize
   
   
   for(n in 1:validationSize) {
@@ -1021,19 +1030,16 @@ NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
       fit(
         data = list(trainX, trainY),
         valid_data = list(validX, validY),
-        epochs = epo
+        epochs = epo,
+        verbose = TRUE
+        #batch_size=100
+        #dataloader_options = c(batch_size=100)
       )
-    
-    #plot(fitted)
-    #fitted
     
     #MSE and MAE (The same ones as above)
     pred = predict(fitted, validX)
     MSE = mean((validY - pred) ^ 2)
     MAE = mean(abs(validY - pred))
-    #plot(validY, pred) 
-    #torch_round(pred, 2)
-    #pred$round()
     
     errorMatrix = rbind(errorMatrix, c("MSE" = MSE$item(), "MAE" = MAE$item()))
   }
@@ -1044,13 +1050,14 @@ NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
 
 
 #Hyper-Parameters
-modelType = c("forward", "LSTM")
+modelType = c("Forward", "LSTM", "GRU")
 hiddenLayers = c(2, 3)
 hiddenUnits = c(2, 3)
 #activationFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
 dropOut = c(0.5, 0)
 #regGrid = c(10^seq(3,-10, length=4), 0)
 epochs = 1 #Just choose best model. => Run for 5 epochs, but if 3rd epoch is better, choose it
+inputSize = 86 #ncol(trainXPools[[1]])
 
 
 hyperParams = expand.grid(
@@ -1064,7 +1071,7 @@ hyperParams = expand.grid(
   # "l2" = regGrid
 )
 
-#validationSize = length(validXPools)
+validationSize = 2 #length(validXPools)
 MSEMatrix = c()
 for(n in 1:nrow(hyperParams)) {
   HP = as.list(hyperParams[n,])
@@ -1072,6 +1079,9 @@ for(n in 1:nrow(hyperParams)) {
   MSEMatrix = rbind(MSEMatrix, c(HP, CV))
 }
 MSEMatrix
+finalResults = MSEMatrix
+finalResults[,-1] = apply(finalResults[,-1], MARGIN=2, FUN=as.numeric)
+finalResults[order(finalResults[,"MSE"]),]
 
 ```
 

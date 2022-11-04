@@ -26,10 +26,8 @@
 # )
 
 
-#torch_manual_seed(13)
-#inputSize = ncol(trainXPools[[1]])
 modnn <- nn_module(
-  initialize = function(input_size, layers, type) {
+  initialize = function(input_size, layers, type, hidUnits, dropout) {
     self$output <- nn_linear(hidUnits, 1)
     self$type <- type
     self$layers <- layers
@@ -39,7 +37,7 @@ modnn <- nn_module(
         input_size = input_size,
         hidden_size = hidUnits,
         num_layers = layers,
-        #dropout = dropout,
+        dropout = dropout,
         #batch_first = TRUE
       )
     } else {
@@ -47,7 +45,7 @@ modnn <- nn_module(
         input_size = input_size,
         hidden_size = hidUnits,
         num_layers = layers,
-        #dropout = dropout,
+        dropout = dropout,
         #batch_first = TRUE
       )
     }

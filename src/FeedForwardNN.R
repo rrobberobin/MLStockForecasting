@@ -1,6 +1,6 @@
 #Model Creation
 hiddenLayer = nn_module(
-  initialize = function(input_size, layers) {
+  initialize = function(input_size, layers, hidUnits, dropout) {
     self$hidden <- nn_linear(input_size, hidUnits)
     self$hidden2 <- nn_linear(hidUnits, hidUnits)
     self$relu <- nn_relu()
@@ -27,11 +27,10 @@ hiddenLayer = nn_module(
   }
 )
 
-#torch_manual_seed(13)
-#inputSize = ncol(trainXPools[[1]])
+
 modnn <- nn_module(
-  initialize = function(input_size, layers, type) {
-    self$hidden <- hiddenLayer(input_size, layers)
+  initialize = function(input_size, layers, type, hidUnits, dropout) {
+    self$hidden <- hiddenLayer(input_size, layers, hidUnits, dropout)
     self$output <- nn_linear(hidUnits, 1)
     
     # self$rnn <- if (self$type == "gru") {
