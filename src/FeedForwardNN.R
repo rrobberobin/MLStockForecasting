@@ -1,25 +1,28 @@
 #Model Creation
 hiddenLayer = nn_module(
-  initialize = function(input_size, layers, hidUnits, dropout) {
+  initialize = function(input_size, layers, hidUnits, dropout, actvFunc) {
     self$hidden <- nn_linear(input_size, hidUnits)
     self$hidden2 <- nn_linear(hidUnits, hidUnits)
-    self$relu <- nn_relu()
-    self$sigmoid <- nn_sigmoid()
     self$dropout <- nn_dropout(dropout)
     self$layers <- layers
+    
+    if (actvFunc == "relu") {
+      self$actv <- nn_relu()
+    } else
+      self$actv <- nn_sigmoid()
     
   },
   forward = function(x) {
     x %<>%
       self$hidden() %>%
-      self$relu() %>%
+      self$actv() %>%
       self$dropout()
     
     if (self$layers > 1) {
       for (n in 1:self$layers) {
         x %<>%
           self$hidden2() %>%
-          self$relu() %>%
+          self$actv() %>%
           self$dropout()
       }
     }
@@ -29,8 +32,8 @@ hiddenLayer = nn_module(
 
 
 modnn <- nn_module(
-  initialize = function(input_size, layers, type, hidUnits, dropout) {
-    self$hidden <- hiddenLayer(input_size, layers, hidUnits, dropout)
+  initialize = function(input_size, layers, type, hidUnits, dropout, actvFunc) {
+    self$hidden <- hiddenLayer(input_size, layers, hidUnits, dropout, actvFunc)
     self$output <- nn_linear(hidUnits, 1)
     
     # self$rnn <- if (self$type == "gru") {

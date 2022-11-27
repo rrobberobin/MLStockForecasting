@@ -27,7 +27,7 @@
 
 
 modnn <- nn_module(
-  initialize = function(input_size, layers, type, hidUnits, dropout) {
+  initialize = function(input_size, layers, type, hidUnits, dropout, actvFunc) {
     self$output <- nn_linear(hidUnits, 1)
     self$type <- type
     self$layers <- layers

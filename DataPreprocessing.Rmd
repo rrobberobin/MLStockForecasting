@@ -1,0 +1,68 @@
+---
+title: "Data preprocessing"
+author: "Robin Perala"
+date: "2022-11-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+
+```{r}
+
+
+require(data.table)
+dt <- fread("finalData.csv")
+countryIndustry = table(dt[,c("loc", "gsector")]) #GICS industry code
+allIndustries = apply(countryIndustry, MARGIN=2, sum)
+countryIndustryWithIndSum = rbind(countryIndustry, "All Industries"=allIndustries)
+allCountries = apply(countryIndustryWithIndSum, MARGIN=1, sum)
+countryIndustryOrg = cbind(countryIndustryWithIndSum, "All Countries"=allCountries)
+
+df = data.frame(countryIndustryOrg)
+df
+# 
+# rmarkdown::paged_table(df)
+# tibble::print.tbl_df(df)
+# knitr::kable(df)
+# 
+# library(tibble)
+# 
+# 
+# library(gt)
+
+#library(formattable)
+#library(reactable)
+
+
+
+# orderedData = data[order(data$fic), ]
+# View(orderedData[1:100,])
+# 
+# india=data[data$loc=="IND",][1:100,]
+# View(india)
+# View(data[data$loc=="AUS",][1:100,])
+# require(DT)
+# datatable(df)
+
+
+
+
+
+
+
+
+
+# if(require(flextable))
+#   flextable(df)
+# 
+# require(magrittr)
+# flextable(df) %>%
+#   theme_vanilla() %>%
+#   save_as_docx(path = "mytable.docx")
+
+#countryIndustryFormatted
+
+```
+
