@@ -26,11 +26,11 @@ knitr::opts_chunk$set(echo = TRUE)
 # library(zeallot)
 
 
-library(dplyr) #Contains "mutate_if" function
-library(magrittr) #Contains pipes, e.g. %<>%
-# library(neuralnet) #For fitting neural networks
-# library(keras) #Contains "keras_model_sequential" function
-library(glmnet) #For regularized linear models (e.g. lasso and ridge)
+# library(dplyr) #Contains "mutate_if" function
+# library(magrittr) #Contains pipes, e.g. %<>%
+# # library(neuralnet) #For fitting neural networks
+# # library(keras) #Contains "keras_model_sequential" function
+# library(glmnet) #For regularized linear models (e.g. lasso and ridge)
 
 
 
@@ -47,20 +47,33 @@ library(glmnet) #For regularized linear models (e.g. lasso and ridge)
 
 #Import data
 require(data.table)
-data <- fread("Compustat.csv", nrows=1000)
+data <- fread("Data/Compustat.csv")
 #orderedData = data[order(names(data))]
-setcolorder(data, order(names(data)))
+#setcolorder(data, order(names(data)))
 #orderedData = setorderv(data, order(names(data)))[]
-#orderedData = order(data)
+#orderedData = data[order(data$capr1q), ]
 
+
+
+
+#We have both banks and industrials
 
 #Clean data
+sumOfNotNA = apply(data, 
+                  MARGIN=2,
+                  FUN = function(x){
+                    sum(!is.na(x))
+                    }
+                  )
+#View(sumOfNotNA)
+
 lessThanHalfNA = apply(data, 
                   MARGIN=2,
                   FUN = function(x){
                     sum(!is.na(x))>nrow(data)/2
                     }
                   )
+
 
 #First: Remove columns with over half NA
 dataFullCol = data[,lessThanHalfNA]
@@ -69,16 +82,16 @@ dataFullCol = data[,lessThanHalfNA]
 dataNoNA = na.omit(dataFullCol)
 #78 166 x 137
 
-write.csv(dataNoNA,"CleanData.csv", row.names = FALSE)
+write.csv(dataNoNA,"Data/CleanData.csv", row.names = FALSE)
 
 
 
 #Second clean
-#cleanData = read.csv("CleanData.csv")
+#cleanData = read.csv("Data/CleanData.csv")
 #orderedCleanData = cleanData[ , order(names(cleanData))]
 
 require(data.table)
-cleanData = fread("CleanData.csv")
+cleanData = fread("Data/CleanData.csv")
 setcolorder(cleanData, order(names(cleanData)))
 
 
@@ -102,7 +115,7 @@ dataNoNA = na.omit(dataFullCol)
 
 #Import price data
 require(data.table)
-prices <- fread("CompustatPrices.csv")
+prices <- fread("Data/CompustatPrices.csv")
 #221 835 959 x 6
 
 #data       final    preliminary
@@ -126,7 +139,7 @@ removeGVKEY = prices[prices$gvkey %in% cleanData$gvkey,]
 #Oldest date in cleanData is 20091130S
 newPrices = removeGVKEY[removeGVKEY$datadate>=(min(cleanData$fdateq)-300),]
 
-write.csv(newPrices,"CleanPrices.csv", row.names = FALSE)
+write.csv(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
 
 ```
 
@@ -134,8 +147,8 @@ write.csv(newPrices,"CleanPrices.csv", row.names = FALSE)
 ```{r combine}
 
 require(data.table)
-newPrices <- fread("CleanPrices.csv")
-cleanData <- fread("CleanData.csv")
+newPrices <- fread("Data/CleanPrices.csv")
+cleanData <- fread("Data/CleanData.csv")
 
 
 compuStat = cleanData
@@ -170,7 +183,7 @@ finalPriceData = orderedMergedData[!duplicated(cbind(orderedMergedData$fdateq,
 
 finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$iid, finalPriceData$fdateq),] #iid is "Issue ID"
 
-write.csv(finalPriceData,"finalPriceData.csv", row.names = FALSE)
+write.csv(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 
 
 #Write into word doc:
@@ -194,7 +207,7 @@ write.csv(finalPriceData,"finalPriceData.csv", row.names = FALSE)
 
 ```{r calculateReturns}
 require(data.table)
-finalPriceData <- fread("finalPriceData.csv")
+finalPriceData <- fread("Data/finalPriceData.csv")
 
 
 ret = function(price, returnFactor, adjustmentFactor) {
@@ -218,7 +231,7 @@ duplicates[1] = TRUE
 
 finalData = returnData[duplicates,]
 
-write.csv(finalData,"finalData.csv", row.names = FALSE)
+write.csv(finalData,"Data/finalData.csv", row.names = FALSE)
 
 #We could also have done this:
 #a = finalData[, ret(prccd, trfd, ajexdi), by = gvkey]
@@ -231,6 +244,9 @@ write.csv(finalData,"finalData.csv", row.names = FALSE)
 
 ```{r Descriptives}
 
+require(data.table)
+cleanData <- fread("Data/cleanData.csv")
+
 colnames(cleanData)[122]
 numsData = cleanData[21:105]
 
@@ -240,7 +256,7 @@ library(moments)
 Skewness = c(skewness(numsData, na.rm=T))
 Kurtosis = c(kurtosis(numsData, na.rm=T))
 kS = round(cbind(Skewness, Kurtosis), 0)
-write.csv(kS, "kurtSkew.csv")
+write.csv(kS, "Descr/kurtSkew.csv")
 
 
 
@@ -248,7 +264,7 @@ write.csv(kS, "kurtSkew.csv")
 library(stargazer)
 stargazer(numsData,
           type = "text",
-          out = "numsDesc.html",
+          out = "Descr/numsDesc.html",
           title = "Descriptive statistics",
           style = "default", #"aer", "qje"
           flip = F,
@@ -259,11 +275,52 @@ stargazer(numsData,
           #add.lines = list(Skewness, Kurtosis)
           )
 
-
 groupData = cleanData[,123:134]
-countryIndustry = table(cleanData[,c("fic", "gsector")]) #GICS industry code
-write.csv(countryIndustry, file = "countryIndustry.csv")
 
+countryIndustry = table(cleanData[,c("loc", "gsector")]) #GICS industry code
+allIndustries = apply(countryIndustry, MARGIN=2, sum)
+countryIndustryWithIndSum = rbind(countryIndustry, "All Industries"=allIndustries)
+allCountries = apply(countryIndustryWithIndSum, MARGIN=1, sum)
+countryIndustry = cbind(countryIndustryWithIndSum, "All Countries"=allCountries)
+
+write.csv(countryIndustry, file = "Descr/countryIndustry.csv")
+
+
+
+countryIndustry = table(finalData[,c("loc", "gsector")]) #GICS industry code
+allIndustries = apply(countryIndustry, MARGIN=2, sum)
+countryIndustryWithIndSum = rbind(countryIndustry, "All Industries"=allIndustries)
+allCountries = apply(countryIndustryWithIndSum, MARGIN=1, sum)
+countryIndustry = cbind(countryIndustryWithIndSum, "All Countries"=allCountries)
+
+write.csv(countryIndustry, file = "Descr/countryIndustry2.csv")
+
+
+countryIndustry = table(data[,c("loc", "gsector")]) #GICS industry code
+allIndustries = apply(countryIndustry, MARGIN=2, sum)
+countryIndustryWithIndSum = rbind(countryIndustry, "All Industries"=allIndustries)
+allCountries = apply(countryIndustryWithIndSum, MARGIN=1, sum)
+countryIndustry = cbind(countryIndustryWithIndSum, "All Countries"=allCountries)
+
+write.csv(countryIndustry, file = "Descr/countryIndustryOrgFile.csv")
+
+
+industryNames = c(
+  "10 Energy",
+  "15 Materials",
+  "20 Industrials",
+  "25 Consumer Discretionary (Consumer Cyclical)",
+  "30 Consumer Staples (Consumer Defensive)",
+  "35 Health Care",
+  "40 Financials",
+  "45 Information Technology",
+  "50 Communication Services",
+  "55 Utilities",
+  "60 Real Estate",
+  "Country"
+)
+colnames(countryIndustryOrg) = industryNames
+countryIndustryFormatted = knitr::kable(countryIndustryOrg)
 
 
 #How many companies? 8450
@@ -284,8 +341,8 @@ dim(table(cleanData[,c("gvkey")]))
 # # X3 <- as.matrix(X2)
 #
 # require(data.table)
-# finalData <- fread("finalData.csv")
-# #finalData2 <- fread("finalData2.csv")
+# finalData <- fread("Data/finalData.csv")
+# #finalData2 <- fread("Data/finalData2.csv")
 #
 #
 # orderedData = finalData[order(-finalData$fdateq, finalData$gvkey, finalData$iid, ),]
@@ -334,8 +391,8 @@ dim(table(cleanData[,c("gvkey")]))
 #
 #
 # require(data.table)
-# finalData <- fread("finalData.csv")
-# #finalData2 <- fread("finalData2.csv")
+# finalData <- fread("Data/finalData.csv")
+# #finalData2 <- fread("Data/finalData2.csv")
 #
 #
 # orderedData = finalData[order(-finalData$fdateq, finalData$gvkey, finalData$iid, ),]
@@ -371,13 +428,46 @@ dim(table(cleanData[,c("gvkey")]))
 #
 # ```
 
-```{r factorizing and removing extra variables}
+```{r removing extra variables}
 
 require(data.table)
-finalData <- fread("finalData.csv")
+finalData <- fread("Data/finalData.csv")
 
 #prirow is the "primary issue tag". Only use primary issue
 finalData=finalData[finalData$iid==finalData$prirow,]
+
+#Removing Unncecessary variables 
+variableNames = c("returns", "gvkey", "fdateq", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
+
+#What is i.datadate???
+#a = finalData[,c("datadate","i.datadate")]
+
+
+#YX = lapply(YXfactor, function(x){x[, ..variableNames]})
+#YX = lapply(YX, function(x){na.omit(x)})
+YX = finalData[, ..variableNames]
+
+
+#removeMissingCalendarData. I could probably manually add these three instead. A simple script for adding
+#which(finalData$datacqtr=="")
+#finalData[c(12721, 68453, 71789),]
+YX=YX[!YX$datacqtr=="",]
+
+#Trash??
+#a = factor(YX[1]$'2009Q4'$sic)
+YX[,"gvkey"] = apply(YX[,"gvkey"], MARGIN = 2, factor)
+
+
+
+write.csv(YX,"Data/YX.csv", row.names = FALSE)
+
+```
+
+```{r ImportHereAndFactorizing}
+
+require(data.table)
+finalData <- fread("Data/YX.csv")
+
 
 #factorizing
 YXfactor = finalData
@@ -406,41 +496,38 @@ YXfactor[,"curcdq"] = apply(YXfactor[,"curcdq"], MARGIN = 2, factor)
 # }
 
 
-#Removing Unncecessary variables 
-variableNames = c("returns", "gvkey", "fdateq", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
 
-#What is i.datadate???
-#a = finalData[,c("datadate","i.datadate")]
-
-
-#YX = lapply(YXfactor, function(x){x[, ..variableNames]})
-#YX = lapply(YX, function(x){na.omit(x)})
-YX = YXfactor[, ..variableNames]
-
-
-#removeMissingCalendarData. I could probably manually add these three instead. A simple script for adding
-#which(finalData$datacqtr=="")
-#finalData[c(12721, 68453, 71789),]
-YX=YX[!YX$datacqtr=="",]
-
-#Trash??
-#a = factor(YX[1]$'2009Q4'$sic)
+#Remove non-numerics
+finalNumericData = Filter(is.numeric, YXfactor[, -c("gvkey", "fdateq")])
+#sum(is.na(finalNumericData))
+finalNumericData = na.omit(finalNumericData)
 
 
 
 ```
 
 
+```{r stationarityAndUnitRoot}
+#Stationarity test
+plm::purtest(finalNumericData)
+
+
+```
+
+
+
 ```{r TrainTestSplit_QuarterlySplit}
 
-finalData = YX
+
+
+finalData = YXfactor
 
 #sorting
 orderedData = finalData[order(-finalData$fdateq, finalData$gvkey),]
 
 quarterGroups = split(orderedData, orderedData$datacqtr)
 
-splitPoint = length(quarterGroups) - 5
+splitPoint = round(length(quarterGroups)*0.7)
 testSize = splitPoint:length(quarterGroups)
 trainValidationSize = 1:(splitPoint-1)
 
@@ -626,7 +713,7 @@ for (n in CVsize) {
 
 ```{r LassoRidge}
 
-library(glmnet)
+# library(glmnet)
 #Use function glmnet (from library glmnet) to perform linear regression with Lasso regularization
 #alpha=1 is lasso.
 
@@ -734,10 +821,10 @@ MSEMatrix
 
 
 ```{r Decision Trees}
-library(haven) #For importing Stata data
-library(tree) #For fitting trees
-library(randomForest) #For bagging and randomforests
-library(gbm) #For boosting
+# library(haven) #For importing Stata data
+# library(tree) #For fitting trees
+# library(randomForest) #For bagging and randomforests
+# library(gbm) #For boosting
 
 
 # #Fit a tree using function "tree" (in library "tree")
@@ -767,7 +854,7 @@ library(gbm) #For boosting
 
 
 #Bagging
-library(randomForest)
+# library(randomForest)
 CVsize = (length(YX)-2):(length(YX)-1)
 
 treefunction = function(p, nTree, nodes) {
@@ -928,7 +1015,7 @@ MSEMatrix
 
 ```{r NNdata}
 
-library(data.table)
+require(data.table)
 drop = c("datacqtr", "fdateq")
 YXNN = lapply(trainValidation, function(x) x[, !..drop])
 
@@ -1009,7 +1096,8 @@ NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
       layers = layers,
       type = type,
       hidUnits = hidUnits,
-      dropout=dropout
+      dropout=dropout,
+      actvFunc=actvFunc
     ) #3130 #inputSize
   
   
@@ -1048,40 +1136,71 @@ NNfunction = function(type, layers, hidUnits, actvFunc, dropout, l1, l2, epo) {
 }
 
 
-
 #Hyper-Parameters
 modelType = c("Forward", "LSTM", "GRU")
 hiddenLayers = c(2, 3)
 hiddenUnits = c(2, 3)
-#activationFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
+activationFunc = c("relu", "sigmoid") #softmax, etc. https://keras.io/api/layers/activations/
 dropOut = c(0.5, 0)
 #regGrid = c(10^seq(3,-10, length=4), 0)
 epochs = 1 #Just choose best model. => Run for 5 epochs, but if 3rd epoch is better, choose it
 inputSize = 86 #ncol(trainXPools[[1]])
 
 
-hyperParams = expand.grid(
-  "type" = modelType,
+NNParams = expand.grid(
+  stringsAsFactors = F,
+  "type" = c("Forward"),
   "layers" = hiddenLayers,
   "hidUnits" = hiddenUnits,
+  "actvFunc" = activationFunc,
   "dropout" = dropOut,
   "epo" = epochs
-  # "activationFunc" = activationFunc,
   # "l1" = regGrid,
   # "l2" = regGrid
 )
 
+RNNParams = expand.grid(
+  stringsAsFactors = F,
+  "type" = c("LSTM", "GRU"),
+  "layers" = hiddenLayers,
+  "hidUnits" = hiddenUnits,
+  "actvFunc" = c("NA"),
+  "dropout" = dropOut,
+  "epo" = epochs
+)
+
+LinearParams = list(
+  "type" = "Linear",
+  "layers" = 0,
+  "hidUnits" = 0,
+  "actvFunc" = "NA",
+  "dropout" = 0,
+  "epo" = 1
+)
+hyperParams = rbind(LinearParams, NNParams, RNNParams)
+
 validationSize = 2 #length(validXPools)
 MSEMatrix = c()
-for(n in 1:nrow(hyperParams)) {
+HPsize = nrow(hyperParams)
+
+for(n in 1:HPsize) {
+  print("\n")
+  cat("Model", n, "out of", HPsize)
+  print("\n")
+  
   HP = as.list(hyperParams[n,])
   CV = do.call(NNfunction, HP)
   MSEMatrix = rbind(MSEMatrix, c(HP, CV))
 }
 MSEMatrix
-finalResults = MSEMatrix
+finalResults = as.data.frame(MSEMatrix)
 finalResults[,-1] = apply(finalResults[,-1], MARGIN=2, FUN=as.numeric)
-finalResults[order(finalResults[,"MSE"]),]
+finalResults = finalResults[order(finalResults[,"MSE"]),]
+finalResults <- apply(finalResults, 2, as.character)
+
+write.csv2(finalResults, "Results/results3.csv", row.names = FALSE)
+
+
 
 ```
 
@@ -1123,7 +1242,8 @@ finalResults[order(finalResults[,"MSE"]),]
 #     batch_size = 3, #32 default. Add as an extra hyper-parameter
 #     validation_data = list(validX, validY)
 #   )
-#
+
+
 # # #Prediction
 # # model %>% evaluate(validX, validY)
 # # pred <- model %>% predict(validX)
@@ -1137,6 +1257,492 @@ finalResults[order(finalResults[,"MSE"]),]
 
 
 ```
+
+```{r LoadFromPython}
+
+fs::dir_tree("Results/bestKerasModel")
+
+#library(tensorflow)
+library(keras)
+
+
+model <- keras::load_model_tf('Results/bestKerasModel')
+
+# Check its architecture
+summary(model)
+
+
+
+
+#Model Fitting
+mymodel <- model %>%
+  fit(
+    trainX,
+    trainY,
+    epochs = epochs,
+    batch_size = 3, #32 default. Add as an extra hyper-parameter
+    validation_data = list(validX, validY)
+  )
+
+
+
+
+#   pooled = do.call(rbind, trainXNN)
+#   pooled = do.call(rbind, trainYNN)
+#   pooled = do.call(rbind, validXNN)
+#   pooled = do.call(rbind, validYNN)
+
+
+#calculate variances
+  
+  
+  
+
+
+```
+
+```{r ExportModelComparisonTable}
+
+modelComparisonTable = data.table::fread("Results/ModelComparison.csv")
+
+
+write.csv(modelComparisonTable, "Results/ModelComparisonTableInR.csv")
+
+
+```
+
+
+```{r Predict}
+
+
+library(magrittr)
+library(keras) #Contains "keras_model_sequential" function
+
+
+
+#Prediction
+allPreds = list(); m = 1
+for(n in testSet){
+  
+  cat("Model number", m)
+  pooled = Filter(function(x) {is.numeric(x)|is.factor(x)}, n)
+  
+  pooled = na.omit(pooled)
+  testX = pooled[, c("fdateq"):=NULL]  #c("gvkey"
+  testX = stats::model.matrix(returns ~ ., testX)[,-1]
+  testX = apply(testX, MARGIN = 2, scale)
+  testY = pooled$returns
+  
+  
+  # testX = n$returns
+  # testY = n$returns
+  model %>% evaluate(testX, testY)
+  pred <- model %>% predict(testX)
+  
+  firmPreds = cbind(n[,c("gvkey", "fdateq", "datacqtr")], pred)
+  allPreds = c(allPreds, list(firmPreds))
+  m = m + 1
+}
+
+
+
+#Scatter Plot Original vs Predicted
+plot(testY, pred, log = "x")
+
+#Plot model error for each epoch
+#plot(model)
+
+
+```
+
+
+```{r FamaFrenchData}
+
+library(data.table)
+# factorData <- 
+#   list.files(path = "FactorData/", pattern = "*.csv") %>% 
+#   purrr::map_df(~fread(.))
+
+
+#Import factors
+developedFactors=fread("FactorData/Developed_ex_US_5_Factors.csv")
+developedMomentum=fread("FactorData/Developed_ex_US_MOM_Factor.csv")
+developed = dplyr::inner_join(x = developedFactors, y = developedMomentum, by = "V1")
+
+emergingFactors=fread("FactorData/Emerging_5_Factors.csv")
+emergingMomentum=fread("FactorData/Emerging_MOM_Factor.csv")
+emerging = dplyr::inner_join(x = emergingFactors, y = emergingMomentum, by = "V1")
+
+
+allFactors = dplyr::inner_join(x = developed, y = emerging, by = "V1", suffix = c(".DM", ".EM"))
+
+
+#allFactors[, `Mkt-RF.DM`+`Mkt-RF.EM`]
+
+#allFactors[, (`Mkt-RF.DM`:WML.DM + `Mkt-RF.EM`:WML.EM)/2]
+
+
+weightedFactors = (allFactors[, `Mkt-RF.DM`:WML.DM] +  allFactors[,`Mkt-RF.EM`:WML.EM])/2
+weightedFactors = cbind(allFactors$V1, weightedFactors)
+colnames(weightedFactors) = names(developed)
+
+
+```
+
+
+```{r quarterlyFactors}
+toQuarters = function(x) {
+  ceiling(x %% 100 / 3)
+}
+
+toYears = function(x) {
+  as.numeric(substr(x, 1, 4))
+} 
+
+toYQ = function(x) {
+  Q=toQuarters(x)
+  Y=signif(x, 4)
+  Y+Q
+} 
+
+library(data.table)
+factorsWithYQ = cbind(weightedFactors, weightedFactors[, .("Y" = toYears(V1),
+                                                           "Q" = toQuarters(V1),
+                                                           "YQ" = toYQ(V1))])
+
+
+
+# geom = function(x) {
+#   exp(mean(log(1+x/100))) - 1
+# }
+
+factorProd = function(x) {
+  decimal = prod((x/100)+1) - 1
+  decimal*100
+}
+
+
+# quarterlyFactors = factorsWithYQ[, .(
+#   Mkt = factorProd(`Mkt-RF`),
+#   SMB = factorProd(SMB),
+#   HML = factorProd(HML),
+#   RMW = factorProd(RMW),
+#   CMA = factorProd(CMA)
+# ), by = YQ]
+# 
+# 
+# quarterlyFactors = factorsWithYQ[, .(
+#   Mkt = factorProd(`Mkt-RF`),
+#   SMB = factorProd(SMB),
+#   HML = factorProd(HML),
+#   RMW = factorProd(RMW),
+#   CMA = factorProd(CMA)
+# ), by = .(Y,Q)]
+
+
+YQ = zoo::as.yearqtr(as.character(weightedFactors$V1), format = "%Y%m")
+factorsWithYQ = cbind(weightedFactors, YQ)
+
+quarterlyFactors = factorsWithYQ[, .(
+  Mkt = factorProd(`Mkt-RF`),
+  SMB = factorProd(SMB),
+  HML = factorProd(HML),
+  RMW = factorProd(RMW),
+  CMA = factorProd(CMA),
+  WML = factorProd(WML),
+  RF  = factorProd(RF)
+), by = YQ]
+
+
+
+write.csv2(quarterlyFactors, "FactorData/quarterlyFactors.csv", row.names = FALSE)
+
+
+```
+
+
+
+```{r TangencyPortfolio}
+
+#quarterlyFactors=fread("FactorData/quarterlyFactors.csv")
+
+
+
+#Extract correct risk-free return
+#cqtr = max(firmPreds$datacqtr)
+
+cqtr = lapply(allPreds, function(x) max(x$datacqtr))
+cqtr = lapply(cqtr, function(x) zoo::as.yearqtr(x, format = "%YQ%q"))
+
+# dateTime = as.POSIXct(cqtr, format="%Y%m")
+# yearMonth = as.numeric(format(dateTime, format="%Y%m"))
+# yearMonth = as.numeric(format(dateTime, format="%Y%m"))
+
+rf0 = quarterlyFactors[YQ %in% cqtr]$RF
+
+
+
+
+# #For creating a covariance matrix
+# pooledForVariance = do.call(rbind, trainValidation)
+# pooledForVariance = as.data.table(pooledForVariance[, c("gvkey", "datacqtr", "returns")])
+# # pooledForVariance = pooledForVariance[gvkey %in% firmPreds$gvkey,]
+# # 
+# # returnMatrix<-dcast.data.table(data=pooledForVariance, datacqtr~gvkey)
+# # dim(returnMatrix[,!"datacqtr"])
+# # length(as.matrix(returnMatrix))
+# # sum(is.na(returnMatrix))
+# # 
+# # V = cov(returnMatrix[, !"datacqtr"])
+
+
+
+
+pooledForVarianceList = lapply(allPreds, function(x) pooledForVariance[gvkey %in% x$gvkey,])
+returnMatrixList = lapply(pooledForVarianceList, function(x) dcast.data.table(data=x, datacqtr~gvkey))
+VList = lapply(returnMatrixList, function(x) cov(x[, !"datacqtr"]))
+
+
+
+
+
+# RwithTickers = firmPreds[gvkey %in% pooledForVariance$gvkey,]
+# R = RwithTickers$V1
+
+RwithTickers = lapply(allPreds, function(x) x[gvkey %in% pooledForVariance$gvkey,])
+R = lapply(RwithTickers, function(x) x$V1)
+
+# #RAndRF = list(R=R, rf0=rf0)
+# 
+# rfMatrix=list()
+# for(n in 1:length(R)){
+#   rfRep = rep(rf0[n], length(R[[n]]))
+#   rfMatrix = c(rfMatrix, list(rfRep))
+# }
+# 
+# rfMatr = do.call(cbind, rfMatrix)
+# RMatr = do.call(cbind, R)
+# 
+# excessReturn = RMatr - rfMatr
+# 
+# 
+
+
+excessReturn=list()
+for(n in 1:length(rf0)){
+  eR = R[[n]] - rf0[n]
+  excessReturn = c(excessReturn, list(eR))
+}
+
+
+
+# length(V)
+# sum(is.na(V))
+# dim(V)
+# isSymmetric(V)
+# 
+# #doubleChecking if PSD with a ready made package
+# #matrixcalc::is.positive.semi.definite(V)
+# 
+# 
+# 
+# #packages for taking inverses of matrices
+# # inverse = Rfast::spdinv(V)
+# # inverse = mnormt::pd.solve(V)
+# # inverse = chol2inv(chol(V))
+# # inverse = solve(V)
+# inverse = MASS::ginv(V)
+# # inverse = matlib::inv(V)
+# #View(V[1:10,1:10])
+# 
+# 
+# length(inverse)
+# sum(is.na(inverse))
+# dim(inverse)
+# isSymmetric(inverse)
+# #View(inverse[1:10,1:10])
+# 
+# #Tangency portfolio
+# numerator = inverse %*% (R-rf)
+# denominator = rep(1, nrow(inverse)) %*% inverse %*% (R-rf)
+# weights <- numerator / denominator[1]   #dividing the numerator by denominator gives us the weights
+# sum(weights)
+# 
+# 
+# portfolio = data.table("gvkey" = RwithTickers$gvkey, "date" = yearMonth, "weight" = c(weights))
+# 
+# 
+# testYwithKey = pooled[,c("gvkey", "returns")]
+# portfolioWithRealized = merge(portfolio, testYwithKey, by = "gvkey") 
+# sum(portfolioWithRealized$weight)
+
+
+
+#Invert
+invList = lapply(VList, MASS::ginv)
+
+#Equivalent solution with lists
+weights=list()
+for(n in 1:length(excessReturn)) {
+  numerator = VList[[n]] %*% excessReturn[[n]]
+  denominator = rep(1, nrow(VList[[n]])) %*% VList[[n]] %*% excessReturn[[n]]
+  weight = numerator / denominator[1]
+  weights = c(weights, list(weight))
+}
+
+#Check
+unlist(lapply(weights, sum))
+
+
+
+portfolios=list()
+for(n in 1:length(weights)) {
+  port = data.table("gvkey" = RwithTickers[[n]]$gvkey, "date" = cqtr[[n]], "weight" = c(weights[[n]]))
+  portfolios = c(portfolios, list(port))
+}
+
+
+
+
+portfolioWithRealizedList = list()
+for(n in 1:length(weights)) {
+  
+  #cat("Model number", m)
+  set = testSet[[n]]
+  #set = Filter(is.numeric, set)
+  set = na.omit(set)
+  testYwithKey = set[, c("gvkey", "returns")]
+  portfolioWithRealized = merge(portfolios[[n]], testYwithKey, by = "gvkey")
+  portfolioWithRealizedList = c(portfolioWithRealizedList, list(portfolioWithRealized))
+  
+  sumN = sum(portfolioWithRealized$weight)
+  print(sumN)
+}
+
+
+```
+
+
+
+
+```{r AbnormalReturns}
+
+
+
+# portfolioWithRealized$portfolioReturn = portfolioWithRealized$weight*portfolioWithRealized$returns
+# portfolioReturn = sum(portfolioWithRealized$portfolioReturn)
+# date = max(portfolioWithRealized$date)
+# 
+# portfolioPerformance = cbind("r"=portfolioReturn, "date"=cqtr)
+# 
+# 
+# #factorsWithReturns = cbind(factorsWithYQ, portfolioWithRealized)
+# factorsWithReturns = merge(portfolioPerformance, quarterlyFactors, by.x = "date", by.y="YQ", all = TRUE)
+# 
+# 
+# factorsWithReturns$excessReturn = factorsWithReturns$r - factorsWithReturns$RF
+# f = excessReturn ~ Mkt+SMB+HML+RMW+CMA+WML
+# 
+# lm(f, data=factorsWithReturns)
+
+
+
+
+
+
+#Using lists
+realizedPortfolios = lapply(portfolioWithRealizedList, function(x) x$weight * x$returns)
+portfolioReturn = lapply(realizedPortfolios, function(x) sum(x))
+
+
+dateList = lapply(portfolioWithRealizedList, function(x) max(x$date))
+portfolioPerformance = cbind("Excess Return"=unlist(portfolioReturn), "date"=unlist(dateList))
+factorsWithReturns = merge(portfolioPerformance, quarterlyFactors, by.x = "date", by.y="YQ", all = TRUE)
+
+
+f = `Excess Return` ~ Mkt+SMB+HML+RMW+CMA+WML
+FamaFrenchSix = lm(f, data=factorsWithReturns)
+summary(FamaFrenchSix)
+
+```
+
+
+```{r FamaFrenchReporting}
+
+
+#winsorize
+#winData = Winsorize(data, probs = c(0.01, 0.99), na.rm=T)
+
+
+
+#maybe add diagnostic tests
+residuals = c(residuals(FamaFrenchSix))
+JB = moments::jarque.test(residuals)
+BP = lmtest::bptest(FamaFrenchSix, data=factorsWithReturns)
+BG = lmtest::bgtest(FamaFrenchSix, order=7, data=factorsWithReturns)
+
+VIF = data.frame(round(car::vif(FamaFrenchSix), 2))
+colnames(VIF)=c("VIF")
+write.csv(VIF, "Results/VIF.csv")
+
+
+
+#Unit root for panel data
+finalNumericData = Filter(is.numeric, YXfactor[, -c("gvkey", "fdateq")])
+#sum(is.na(finalNumericData))
+finalNumericData = na.omit(finalNumericData)
+compustatStationarity = plm::purtest(finalNumericData)
+
+
+
+
+# #Unit root
+# fUnitRoots::adfTest(factorsWithReturns$excessReturn, lags = 1, type = c("nc"), title = NULL, description = NULL)
+
+
+# #Slumpmässig eller fasteffekt (Hausman)
+# phtest(firmRandom,firmFixed)
+# summary(firmFixedTwo) #bättre
+# 
+# #Slump eller pooled
+# plmtest(factorsWithReturns, type="bp")
+# 
+# #Fast eller pooled
+# plm::pFtest(firmFixedTwo,firmPooledTwo)
+# lmtest::waldtest(firmFixedTwo,firmPooledTwo)
+# plm::pwaldtest(firmFixed,firmPooled)
+
+
+
+#Compile the tests
+diagnostics = rbind(c(JB$p.value, JB$statistic),
+                    c(BP$p.value, BP$statistic),
+                    c(BG$p.value, BG$statistic))
+diagnostics = round(diagnostics,3)
+
+diagnostics = list(c("Jarque-Bera", round(JB$p.value,3),JB$statistic),
+                   c("Breusch-Pagan", round(BP$p.value,3), BP$statistic),
+                   c("Breusch-Godfrey", round(BG$p.value,3), BG$statistic))
+
+
+
+#robust errors: HAC?
+robustErrors = vcovHC(winsMargin,method="arellano")
+
+
+#Export
+stargazer::stargazer(FamaFrenchSix,
+                     type="text",
+                     report=("vc*p"),
+                     add.lines = diagnostics,
+                     out = "Results/FamaFrenchSixFactors.html"
+                     )
+
+
+
+
+```
+
 
 
 ```{r RNN Keras}
