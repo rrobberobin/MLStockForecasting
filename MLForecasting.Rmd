@@ -115,7 +115,7 @@ dataNoNA = na.omit(dataFullCol)
 
 #Import price data
 require(data.table)
-prices <- fread("Data/CompustatPrices.csv")
+prices <- fread("Data/CompustatPrices.csv", nrows=100)
 #221 835 959 x 6
 
 #data       final    preliminary
@@ -205,7 +205,7 @@ write.csv(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 ```
 
 
-```{r calculateReturns}
+```{r calculateReturnsAndMktCaps}
 require(data.table)
 finalPriceData <- fread("Data/finalPriceData.csv")
 
@@ -218,13 +218,22 @@ ret = function(price, returnFactor, adjustmentFactor) {
   (numerator/denominator-1) * 100
 }
 
+MktCapFunction = function(price, sharesOutstanding) {
+  price * sharesOutstanding
+}
+
+
 returns = ret(price=finalPriceData$prccd, 
                  returnFactor=finalPriceData$trfd, 
                  adjustmentFactor=finalPriceData$ajexdi)
 
+MktCaps = MktCapFunction(price = finalPriceData$prccd,
+                         sharesOutstanding = finalPriceData$cshoc)
 
-returnData = cbind(returns, finalPriceData[-1,]) 
-  
+returnData = cbind(returns, MktCaps[-1], finalPriceData[-1,]) 
+
+
+
 #1 is there because I already dropped the first row when calculating returns
 duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
 duplicates[1] = TRUE
@@ -237,9 +246,6 @@ write.csv(finalData,"Data/finalData.csv", row.names = FALSE)
 #a = finalData[, ret(prccd, trfd, ajexdi), by = gvkey]
 
 ```
-
-
-
 
 
 ```{r Descriptives}
@@ -510,6 +516,13 @@ finalNumericData = na.omit(finalNumericData)
 ```{r stationarityAndUnitRoot}
 #Stationarity test
 plm::purtest(finalNumericData)
+
+
+
+#Check biggest return
+min(finalData$returns, na.rm = T) #-99.27552
+max(finalData$returns, na.rm = T) #4561.336
+
 
 
 ```
@@ -1260,13 +1273,13 @@ write.csv2(finalResults, "Results/results3.csv", row.names = FALSE)
 
 ```{r LoadFromPython}
 
-fs::dir_tree("Results/bestKerasModel")
+fs::dir_tree("Results/BestKerasModel2")
 
 #library(tensorflow)
 library(keras)
 
 
-model <- keras::load_model_tf('Results/bestKerasModel')
+model <- keras::load_model_tf('Results/BestKerasModel2')
 
 # Check its architecture
 summary(model)
