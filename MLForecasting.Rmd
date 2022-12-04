@@ -82,32 +82,39 @@ dataFullCol = data[,lessThanHalfNA]
 dataNoNA = na.omit(dataFullCol)
 #78 166 x 137
 
-write.csv(dataNoNA,"Data/CleanData.csv", row.names = FALSE)
+fwrite(dataNoNA,"Data/CleanData.csv", row.names = FALSE)
 
 
 
+```
+
+
+
+
+```{r withoutMissingValues}
 #Second clean
-#cleanData = read.csv("Data/CleanData.csv")
-#orderedCleanData = cleanData[ , order(names(cleanData))]
 
 require(data.table)
 cleanData = fread("Data/CleanData.csv")
 setcolorder(cleanData, order(names(cleanData)))
 
 
-allNA = apply(cleanData, 
-              MARGIN=2,
-              FUN = function(x){ 
-                all(is.na(x))
-                }
-              )
-sum(allNA)
-
-#First: Remove columns with over half NA
-dataFullCol = orderedCleanData[,!allNA]
-
-#Second: Remove all rows with NA
-dataNoNA = na.omit(dataFullCol)
+# allNA = apply(cleanData, 
+#               MARGIN=2,
+#               FUN = function(x){ 
+#                 all(is.na(x))
+#                 }
+#               )
+# sum(allNA)
+# 
+# 
+# orderedCleanData = cleanData[ , order(names(cleanData))]
+# 
+# #First: Remove columns with over half NA
+# dataFullCol = orderedCleanData[,!allNA]
+# 
+# #Second: Remove all rows with NA
+# dataNoNA = na.omit(dataFullCol)
 ```
 
 
@@ -115,7 +122,7 @@ dataNoNA = na.omit(dataFullCol)
 
 #Import price data
 require(data.table)
-prices <- fread("Data/CompustatPrices.csv", nrows=100)
+prices <- fread("Data/CompustatPrices.csv")
 #221 835 959 x 6
 
 #data       final    preliminary
@@ -139,34 +146,57 @@ removeGVKEY = prices[prices$gvkey %in% cleanData$gvkey,]
 #Oldest date in cleanData is 20091130S
 newPrices = removeGVKEY[removeGVKEY$datadate>=(min(cleanData$fdateq)-300),]
 
-write.csv(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
+fwrite(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
 
 ```
 
 
-```{r combine}
+```{r combineCompustatAndCRSP}
 
 require(data.table)
 newPrices <- fread("Data/CleanPrices.csv")
 cleanData <- fread("Data/CleanData.csv")
 
 
-compuStat = cleanData
+compuStat=cleanData
 #https://stackoverflow.com/questions/35046161/how-to-do-a-data-table-rolling-join
-# create an interval in the 'compuStat' datatable
-compuStat[, `:=` (start = fdateq + 1, end = fdateq + 100)]
-# create a second date in the 'prices' datatable
+# create an interval in the 'compuStat' data.table
+
+
+#Rebalancing 1.2, 1.5, 1.8, and 1.11
+periodization = function(date){
+  YYYY = signif(date, 4)
+  MMDD = date %% 10000
+  
+  if(1100<MMDD) {res = YYYY + 201 + 10000}
+  else if(800<MMDD) {res = YYYY + 1101}
+  else if(500<MMDD) {res = YYYY + 801}
+  else if(200<MMDD) {res = YYYY + 501}
+  else {res = YYYY + 201}
+  "start" = res
+}
+
+start = unlist(lapply(compuStat$fdateq, FUN=periodization))
+end = start + 7  #56753 with 1 #65325 with 2 #65 331 with 3 #65 333 with 4 #65 334 with 5
+compuStat[, `:=` (start=start, end=end)]
+
+#compuStat[, `:=` (start = fdateq + 1, end = fdateq + 300)]
+#as.POSIXct(zoo::as.yearqtr(strptime(20221212, format = "%Y%m%d")))
+
+
+# create a second date in the 'prices' data.table
 newPrices[, Date2 := datadate]
 
-# set the keys for the two datatable
+# set the keys for the two data tables
 setkey(compuStat, gvkey, start, end)
 setkey(newPrices, gvkey, datadate, Date2)
 
 # create a vector of columnnames which can be removed afterwards
-deletecols <- c("Date2","start","end")
+deletecols <- c("Date2", "start", "end")
 
 # perform the overlap join and remove the helper columns
 mergedData <- foverlaps(compuStat, newPrices)[, (deletecols) := NULL]
+
 
 
 ##alternative: non-equi join
@@ -174,16 +204,17 @@ mergedData <- foverlaps(compuStat, newPrices)[, (deletecols) := NULL]
 # mergedData2 = newPrices[compuStat, on = .(gvkey, datadate >= start, datadate <= end)]
 
 
-
-orderedMergedData = mergedData[order(mergedData$gvkey, mergedData$iid, -mergedData$datadate),]
-finalPriceData = orderedMergedData[!duplicated(cbind(orderedMergedData$fdateq,
-                                                orderedMergedData$gvkey,
-                                                orderedMergedData$iid)),]
-
+mergedData = mergedData[order(mergedData$gvkey, mergedData$iid, -mergedData$datadate, -mergedData$fdateq),]
+finalPriceData = mergedData[!duplicated(cbind(mergedData$fdateq,
+                                                mergedData$gvkey,
+                                                mergedData$iid)),]
 
 finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$iid, finalPriceData$fdateq),] #iid is "Issue ID"
 
-write.csv(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
+#Remove non-primary IDs
+finalPriceData = finalPriceData[finalPriceData$iid==finalPriceData$prirow,]
+
+fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 
 
 #Write into word doc:
@@ -227,10 +258,10 @@ returns = ret(price=finalPriceData$prccd,
                  returnFactor=finalPriceData$trfd, 
                  adjustmentFactor=finalPriceData$ajexdi)
 
-MktCaps = MktCapFunction(price = finalPriceData$prccd,
+MktCap = MktCapFunction(price = finalPriceData$prccd,
                          sharesOutstanding = finalPriceData$cshoc)
 
-returnData = cbind(returns, MktCaps[-1], finalPriceData[-1,]) 
+returnData = cbind("returns" = returns, "MktCap" = MktCap[-1], finalPriceData[-1, ])
 
 
 
@@ -240,7 +271,7 @@ duplicates[1] = TRUE
 
 finalData = returnData[duplicates,]
 
-write.csv(finalData,"Data/finalData.csv", row.names = FALSE)
+fwrite(finalData,"Data/finalData.csv", row.names = FALSE)
 
 #We could also have done this:
 #a = finalData[, ret(prccd, trfd, ajexdi), by = gvkey]
@@ -251,7 +282,7 @@ write.csv(finalData,"Data/finalData.csv", row.names = FALSE)
 ```{r Descriptives}
 
 require(data.table)
-cleanData <- fread("Data/cleanData.csv")
+cleanData <- fread("Data/cleanData.csv") #this whole  chunk should be updated to finalData.csv
 
 colnames(cleanData)[122]
 numsData = cleanData[21:105]
@@ -434,7 +465,7 @@ dim(table(cleanData[,c("gvkey")]))
 #
 # ```
 
-```{r removing extra variables}
+```{r removingExtraVariables}
 
 require(data.table)
 finalData <- fread("Data/finalData.csv")
@@ -443,7 +474,7 @@ finalData <- fread("Data/finalData.csv")
 finalData=finalData[finalData$iid==finalData$prirow,]
 
 #Removing Unncecessary variables 
-variableNames = c("returns", "gvkey", "fdateq", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
+variableNames = c("returns", "MktCap", "gvkey", "fdateq", "datadate", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
 
 #What is i.datadate???
 #a = finalData[,c("datadate","i.datadate")]
@@ -465,18 +496,18 @@ YX[,"gvkey"] = apply(YX[,"gvkey"], MARGIN = 2, factor)
 
 
 
-write.csv(YX,"Data/YX.csv", row.names = FALSE)
+fwrite(YX,"Data/YX.csv", row.names = FALSE)
 
 ```
 
 ```{r ImportHereAndFactorizing}
 
 require(data.table)
-finalData <- fread("Data/YX.csv")
+YX <- fread("Data/YX.csv")
 
 
 #factorizing
-YXfactor = finalData
+YXfactor = YX
 factorCols = c("gvkey", "curcdq", "exchg", "fic", "city", "fyrc",
         "ggroup", "gind", "gsector", 
         "gsubind", "idbflag", "loc", 
@@ -516,13 +547,16 @@ finalNumericData = na.omit(finalNumericData)
 ```{r stationarityAndUnitRoot}
 #Stationarity test
 plm::purtest(finalNumericData)
-
+sum(is.na(finalNumericData))
 
 
 #Check biggest return
 min(finalData$returns, na.rm = T) #-99.27552
 max(finalData$returns, na.rm = T) #4561.336
 
+#Returns stationarity (Will not anyway winsorize these). This is wrong as we have panel data
+#fUnitRoots::adfTest(finalData$returns, lags = 252, type = c("nc"), title = NULL, description = NULL)
+#plm::purtest(finalNumericData, index="gvkey")
 
 
 ```
@@ -530,8 +564,6 @@ max(finalData$returns, na.rm = T) #4561.336
 
 
 ```{r TrainTestSplit_QuarterlySplit}
-
-
 
 finalData = YXfactor
 
@@ -1271,103 +1303,6 @@ write.csv2(finalResults, "Results/results3.csv", row.names = FALSE)
 
 ```
 
-```{r LoadFromPython}
-
-fs::dir_tree("Results/BestKerasModel2")
-
-#library(tensorflow)
-library(keras)
-
-
-model <- keras::load_model_tf('Results/BestKerasModel2')
-
-# Check its architecture
-summary(model)
-
-
-
-
-#Model Fitting
-mymodel <- model %>%
-  fit(
-    trainX,
-    trainY,
-    epochs = epochs,
-    batch_size = 3, #32 default. Add as an extra hyper-parameter
-    validation_data = list(validX, validY)
-  )
-
-
-
-
-#   pooled = do.call(rbind, trainXNN)
-#   pooled = do.call(rbind, trainYNN)
-#   pooled = do.call(rbind, validXNN)
-#   pooled = do.call(rbind, validYNN)
-
-
-#calculate variances
-  
-  
-  
-
-
-```
-
-```{r ExportModelComparisonTable}
-
-modelComparisonTable = data.table::fread("Results/ModelComparison.csv")
-
-
-write.csv(modelComparisonTable, "Results/ModelComparisonTableInR.csv")
-
-
-```
-
-
-```{r Predict}
-
-
-library(magrittr)
-library(keras) #Contains "keras_model_sequential" function
-
-
-
-#Prediction
-allPreds = list(); m = 1
-for(n in testSet){
-  
-  cat("Model number", m)
-  pooled = Filter(function(x) {is.numeric(x)|is.factor(x)}, n)
-  
-  pooled = na.omit(pooled)
-  testX = pooled[, c("fdateq"):=NULL]  #c("gvkey"
-  testX = stats::model.matrix(returns ~ ., testX)[,-1]
-  testX = apply(testX, MARGIN = 2, scale)
-  testY = pooled$returns
-  
-  
-  # testX = n$returns
-  # testY = n$returns
-  model %>% evaluate(testX, testY)
-  pred <- model %>% predict(testX)
-  
-  firmPreds = cbind(n[,c("gvkey", "fdateq", "datacqtr")], pred)
-  allPreds = c(allPreds, list(firmPreds))
-  m = m + 1
-}
-
-
-
-#Scatter Plot Original vs Predicted
-plot(testY, pred, log = "x")
-
-#Plot model error for each epoch
-#plot(model)
-
-
-```
-
 
 ```{r FamaFrenchData}
 
@@ -1403,7 +1338,7 @@ colnames(weightedFactors) = names(developed)
 ```
 
 
-```{r quarterlyFactors}
+```{r QuarterlyFactors}
 toQuarters = function(x) {
   ceiling(x %% 100 / 3)
 }
@@ -1475,9 +1410,106 @@ write.csv2(quarterlyFactors, "FactorData/quarterlyFactors.csv", row.names = FALS
 
 
 
+```{r LoadKerasModelFromPython}
+
+fs::dir_tree("Results/BestKerasModel2")
+
+#library(tensorflow)
+library(keras)
+
+
+model <- keras::load_model_tf('Results/BestKerasModel3')
+
+# Check its architecture
+summary(model)
+
+
+
+
+# #Model Fitting
+# mymodel <- model %>%
+#   fit(
+#     trainX,
+#     trainY,
+#     epochs = epochs,
+#     batch_size = 32, #32 default. Add as an extra hyper-parameter
+#     validation_data = list(validX, validY)
+#   )
+
+
+
+
+#   pooled = do.call(rbind, trainXNN)
+#   pooled = do.call(rbind, trainYNN)
+#   pooled = do.call(rbind, validXNN)
+#   pooled = do.call(rbind, validYNN)
+
+
+#calculate variances
+  
+  
+  
+
+
+```
+
+```{r ExportModelComparisonTable}
+
+# modelComparisonTable = data.table::fread("Results/ModelComparison.csv")
+# 
+# 
+# write.csv(modelComparisonTable, "Results/ModelComparisonTableInR.csv")
+
+
+```
+
+
+```{r Predict}
+
+
+library(magrittr)
+library(keras) #Contains "keras_model_sequential" function
+
+
+
+#Prediction
+allPreds = list(); m = 1
+for(n in testSet){
+  
+  cat("Model number", m)
+  pooled = Filter(function(x) {is.numeric(x)|is.factor(x)}, n)
+  
+  pooled = na.omit(pooled)
+  testX = pooled[, c("fdateq"):=NULL]  #c("gvkey"
+  testX = stats::model.matrix(returns ~ ., testX)[,-1]
+  testX = apply(testX, MARGIN = 2, scale)
+  testY = pooled$returns
+  
+  
+  # testX = n$returns
+  # testY = n$returns
+  model %>% evaluate(testX, testY)
+  pred <- model %>% predict(testX)
+  
+  firmPreds = cbind(n[,c("gvkey", "fdateq", "datacqtr")], pred)
+  allPreds = c(allPreds, list(firmPreds))
+  m = m + 1
+}
+
+
+
+#Scatter Plot Original vs Predicted
+plot(testY, pred, log = "x")
+
+#Plot model error for each epoch
+#plot(model)
+
+
+```
+
 ```{r TangencyPortfolio}
 
-#quarterlyFactors=fread("FactorData/quarterlyFactors.csv")
+quarterlyFactors=fread("FactorData/quarterlyFactors.csv")
 
 
 
