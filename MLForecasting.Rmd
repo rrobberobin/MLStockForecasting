@@ -3,6 +3,8 @@ title: "Master's Thesis"
 author: "Robin Perala"
 date: "2022-09-10"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -91,7 +93,7 @@ fwrite(dataNoNA,"Data/CleanData.csv", row.names = FALSE)
 
 
 
-```{r withoutMissingValues}
+```{r WithoutMissingValues}
 #Second clean
 
 require(data.table)
@@ -511,27 +513,14 @@ YXfactor = YX
 factorCols = c("gvkey", "curcdq", "exchg", "fic", "city", "fyrc",
         "ggroup", "gind", "gsector", 
         "gsubind", "idbflag", "loc", 
-        "naics", "sic")
+        "naics", "sic", "fdateq", "datadate", "datacqtr")
 
-YXfactor[,"gvkey"] = apply(YXfactor[,"gvkey"], MARGIN = 2, factor)
-YXfactor[,"sic"] = apply(YXfactor[,"sic"], MARGIN = 2, factor)
-YXfactor[,"naics"] = apply(YXfactor[,"naics"], MARGIN = 2, factor)
-YXfactor[,"loc"] = apply(YXfactor[,"loc"], MARGIN = 2, factor)
-YXfactor[,"idbflag"] = apply(YXfactor[,"idbflag"], MARGIN = 2, factor)
-YXfactor[,"gsubind"] = apply(YXfactor[,"gsubind"], MARGIN = 2, factor)
-YXfactor[,"gsector"] = apply(YXfactor[,"gsector"], MARGIN = 2, factor)
-YXfactor[,"gind"] = apply(YXfactor[,"gind"], MARGIN = 2, factor)
-YXfactor[,"ggroup"] = apply(YXfactor[,"ggroup"], MARGIN = 2, factor)
-YXfactor[,"fyrc"] = apply(YXfactor[,"fyrc"], MARGIN = 2, factor)
-YXfactor[,"city"] = apply(YXfactor[,"city"], MARGIN = 2, factor)
-YXfactor[,"fic"] = apply(YXfactor[,"fic"], MARGIN = 2, factor)
-YXfactor[,"exchg"] = apply(YXfactor[,"exchg"], MARGIN = 2, factor)
-YXfactor[,"curcdq"] = apply(YXfactor[,"curcdq"], MARGIN = 2, factor)
+YXfactor[, c(factorCols) := lapply(.SD, factor), .SDcols = c(factorCols)]
 
-# for(n in factorCols){
-#   YXfactor[,..n] = apply(YXfactor[,..n], MARGIN = 2, factor)
-# }
-
+#Create date objects
+YXfactor$fdateq = as.Date(YXfactor$fdateq, format = '%Y%m%d')
+YXfactor$datadate = as.Date(YXfactor$datadate, format = '%Y%m%d')
+YXfactor$datacqtr = zoo::as.yearqtr(YXfactor$datacqtr, format = "%YQ%q")
 
 
 #Remove non-numerics
@@ -542,6 +531,53 @@ finalNumericData = na.omit(finalNumericData)
 
 
 ```
+
+```{r TrainValidationTestQuarterlyPlot}
+
+#Plot the time series
+# require(ggplot2)
+# ggplot(data = YXfactor, aes(x = fdateq)) +
+#       geom_bar(stat = "count", fill = "green")
+# 
+# ggplot(data = YXfactor, aes(x = datadate)) +
+#       geom_bar(stat = "count", fill = "red")
+
+startQuarter = min(YXfactor$datacqtr)
+endQuarter = max(YXfactor$datacqtr)
+dataRange = paste(as.character(startQuarter), "-", as.character(endQuarter))
+quarters = length(unique(YXfactor$datacqtr))
+years = quarters/4
+
+sortedQuarters = sort(unique(YXfactor$datacqtr))
+
+trainValidSplitPoint = round(quarters*0.4)
+validTestSplitPoint = round(quarters*0.7)
+
+trainQuarters = sortedQuarters[1:trainValidSplitPoint]
+validQuarters = sortedQuarters[trainValidSplitPoint:validTestSplitPoint]
+testQuarters = sortedQuarters[validTestSplitPoint:quarters]
+
+tTVSplitFunction = function(x){
+  if(x %in% trainQuarters) {"Train"}
+  else if(x %in% validQuarters) {"Validation"}
+  else {"Test"}
+}
+
+YXfactor = YXfactor[, "Split" := unlist(lapply(datacqtr, tTVSplitFunction))]
+YXfactor$Split = factor(YXfactor$Split)
+
+
+#Plot for document
+ggplot(data = YXfactor, aes(x = datacqtr, fill = Split)) +
+  geom_bar(stat = "count") +
+  labs(title = "Train-Validation-Test Quarterly Split",
+       subtitle = dataRange, 
+       x = "Quarter", y = "Observations") + 
+  zoo::scale_x_yearqtr(format = '%Y', n = years)
+
+
+```
+
 
 
 ```{r stationarityAndUnitRoot}
@@ -1465,6 +1501,8 @@ summary(model)
 
 
 ```{r Predict}
+require(data.table)
+ScaledWinsRatioData <- fread("Data/ScaledWinsRatioData.csv")
 
 
 library(magrittr)
