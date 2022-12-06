@@ -596,7 +596,8 @@ fwrite(YX,"Data/YX.csv", row.names = FALSE)
 ```{r ImportHereAndFactorizing}
 
 require(data.table)
-YX <- fread("Data/YX.csv")
+#YX <- fread("Data/YX.csv")
+YX <- fread("Data/ScaledWinsRatioData.csv")
 
 
 #factorizing
@@ -677,6 +678,7 @@ ggplot(data = YXfactor, aes(x = datacqtr, fill = Split)) +
 
 
 
+fwrite(YXfactor,"Data/YXWithSplit.csv", row.names = FALSE)
 
 
 
