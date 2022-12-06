@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libs}
 
 
-#Check files: RnD, Lab8-Garch, OptimalHedgeRatio, Ex4Part2, nnboston
+#Check files: RnD, Lab8-Garch, OptimalHedgeRatio, Ex4Part2, nnboston, HW7, Gridsearch, LSTM
 
 
 
@@ -49,19 +49,23 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #Import data
 require(data.table)
-data <- fread("Data/Compustat.csv")
+data <- fread("Data/OriginalData/Compustat.csv")
 #orderedData = data[order(names(data))]
 #setcolorder(data, order(names(data)))
 #orderedData = setorderv(data, order(names(data)))[]
 #orderedData = data[order(data$capr1q), ]
 
 
+#Which firms do not have quarters?
+quarterIndex = !data$datacqtr==""
+dataNoQuarter = data[quarterIndex, ]
+#dataNoNA = Filter(!data$datacqtr=="", data)
 
 
 #We have both banks and industrials
 
 #Clean data
-sumOfNotNA = apply(data, 
+sumOfNotNA = apply(dataNoQuarter, 
                   MARGIN=2,
                   FUN = function(x){
                     sum(!is.na(x))
@@ -69,7 +73,7 @@ sumOfNotNA = apply(data,
                   )
 #View(sumOfNotNA)
 
-lessThanHalfNA = apply(data, 
+lessThanHalfNA = apply(dataNoNA, 
                   MARGIN=2,
                   FUN = function(x){
                     sum(!is.na(x))>nrow(data)/2
@@ -78,7 +82,7 @@ lessThanHalfNA = apply(data,
 
 
 #First: Remove columns with over half NA
-dataFullCol = data[,lessThanHalfNA]
+dataFullCol = dataNoQuarter[,lessThanHalfNA]
 
 #Second: Remove all rows with NA
 dataNoNA = na.omit(dataFullCol)
@@ -90,6 +94,71 @@ fwrite(dataNoNA,"Data/CleanData.csv", row.names = FALSE)
 
 ```
 
+
+
+```{r GGPlot}
+
+
+startQuarter = min(data[!data$datacqtr=="",datacqtr])
+endQuarter = max(data[!data$datacqtr=="",datacqtr])
+dataRange = paste(as.character(startQuarter), "-", as.character(endQuarter))
+quarters = length(unique(data$datacqtr))
+years = quarters/4
+
+#sortedQuarters = sort(unique(YXfactor$datacqtr))
+
+
+data$datacqtr = zoo::as.yearqtr(data$datacqtr, format = "%YQ%q")
+
+
+#Plot for document
+require(ggplot2)
+ggplot(data = data[datacqtr>"2009 Q3",], aes(x = datacqtr)) +
+  geom_bar(stat = "count") +
+  labs(title = "Compustat Full Data",
+       subtitle = dataRange,
+       x = "Quarter", y = "Observations")
+
+yearlyFrequencyOriginalData = table(data$datacqtr)
+View(yearlyFrequencyOriginalData)
+
+
+
+
+
+
+#Same for cleaned data
+cleanData = fread("Data/CleanData.csv")
+
+startQuarter = min(cleanData[!cleanData$datacqtr=="",datacqtr])
+endQuarter = max(cleanData[!cleanData$datacqtr=="",datacqtr])
+dataRange = paste(as.character(startQuarter), "-", as.character(endQuarter))
+quarters = length(unique(cleanData$datacqtr))
+years = quarters/4
+
+#sortedQuarters = sort(unique(YXfactor$datacqtr))
+
+
+cleanData$datacqtr = zoo::as.yearqtr(cleanData$datacqtr, format = "%YQ%q")
+
+ggplot(data = cleanData, aes(x = datacqtr)) +
+  geom_bar(stat = "count") +
+  labs(title = "Compustat Filtered Data",
+       subtitle = dataRange,
+       x = "Quarter", y = "Observations")
+
+yearlyFrequencyCleanData = table(cleanData$datacqtr)
+View(yearlyFrequencyCleanData)
+
+
+temporalFrequencyTable = merge(yearlyFrequencyOriginalData, yearlyFrequencyCleanData, 
+                               by = "Var1", suffixes = c(".Original", ".Filtered"), all = TRUE)
+
+write.csv(temporalFrequencyTable, "Descr/temporalFrequencyTable.csv")
+
+
+
+```
 
 
 
@@ -124,7 +193,7 @@ setcolorder(cleanData, order(names(cleanData)))
 
 #Import price data
 require(data.table)
-prices <- fread("Data/CompustatPrices.csv")
+prices <- fread("Data/OriginalData/CompustatPrices.csv")
 #221 835 959 x 6
 
 #data       final    preliminary
@@ -158,6 +227,11 @@ fwrite(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
 require(data.table)
 newPrices <- fread("Data/CleanPrices.csv")
 cleanData <- fread("Data/CleanData.csv")
+
+
+#View(newPrices[1:1000,])
+#View price data in wide format
+#widePrices = dcast(newPrices[,], datadate~gvkey + iid, value.var = "prccd")
 
 
 compuStat=cleanData
@@ -242,6 +316,9 @@ fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 require(data.table)
 finalPriceData <- fread("Data/finalPriceData.csv")
 
+#View price data in wide format
+#widePrices = dcast(finalPriceData, datadate~gvkey + iid, value.var = "prccd")
+
 
 ret = function(price, returnFactor, adjustmentFactor) {
   n = length(price)
@@ -263,7 +340,11 @@ returns = ret(price=finalPriceData$prccd,
 MktCap = MktCapFunction(price = finalPriceData$prccd,
                          sharesOutstanding = finalPriceData$cshoc)
 
-returnData = cbind("returns" = returns, "MktCap" = MktCap[-1], finalPriceData[-1, ])
+
+
+#I'm dropping the last observation here, which might not be necessary. 
+#I could implement an algorithm which incldes the observation
+returnData = cbind("returns" = returns, "MktCap" = MktCap[-length(MktCap)], finalPriceData[-nrow(finalPriceData), ])
 
 
 
@@ -271,12 +352,22 @@ returnData = cbind("returns" = returns, "MktCap" = MktCap[-1], finalPriceData[-1
 duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
 duplicates[1] = TRUE
 
-finalData = returnData[duplicates,]
+returnData = returnData[duplicates,]
 
-fwrite(finalData,"Data/finalData.csv", row.names = FALSE)
+fwrite(returnData,"Data/finalData.csv", row.names = FALSE)
 
-#We could also have done this:
-#a = finalData[, ret(prccd, trfd, ajexdi), by = gvkey]
+
+
+
+#I think everything above is wrong; while this is correct
+returnData2 = finalPriceData
+returnData2 = returnData2[, "returns" := c(ret(prccd, trfd, ajexdi), NA), by = gvkey]
+returnData2 = returnData2[, "MktCap" := MktCapFunction(prccd, cshoc)]
+returnData2 = returnData2[!is.na(returnData2$returns),]
+
+
+fwrite(returnData2,"Data/finalData.csv", row.names = FALSE)
+
 
 ```
 
@@ -568,12 +659,25 @@ YXfactor$Split = factor(YXfactor$Split)
 
 
 #Plot for document
+require(ggplot2)
+ggplot(data = YXfactor, aes(x = datacqtr)) +
+  geom_bar(stat = "count") +
+  labs(title = "Final Data",
+       subtitle = dataRange,
+       x = "Quarter", y = "Observations") +
+  zoo::scale_x_yearqtr(format = '%Y', n = years)
+
+
 ggplot(data = YXfactor, aes(x = datacqtr, fill = Split)) +
   geom_bar(stat = "count") +
   labs(title = "Train-Validation-Test Quarterly Split",
        subtitle = dataRange, 
        x = "Quarter", y = "Observations") + 
   zoo::scale_x_yearqtr(format = '%Y', n = years)
+
+
+
+
 
 
 ```
