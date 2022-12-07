@@ -253,7 +253,7 @@ periodization = function(date){
 }
 
 start = unlist(lapply(compuStat$fdateq, FUN=periodization))
-end = start + 7  #56753 with 1 #65325 with 2 #65 331 with 3 #65 333 with 4 #65 334 with 5
+end = start + 2    #56753 with 1    #65325 with 2     #65 331 with 3     #65 333 with 4    #65 334 with 5   #usually I use +7
 compuStat[, `:=` (start=start, end=end)]
 
 #compuStat[, `:=` (start = fdateq + 1, end = fdateq + 300)]
@@ -264,11 +264,11 @@ compuStat[, `:=` (start=start, end=end)]
 newPrices[, Date2 := datadate]
 
 # set the keys for the two data tables
-setkey(compuStat, gvkey, start, end)
-setkey(newPrices, gvkey, datadate, Date2)
+setkey(compuStat, gvkey, prirow, start, end)
+setkey(newPrices, gvkey, iid, datadate, Date2) #iid is "Issue ID"
 
 # create a vector of columnnames which can be removed afterwards
-deletecols <- c("Date2", "start", "end")
+deletecols <- c("Date2", "start", "end", "prirow", "i.datadate")
 
 # perform the overlap join and remove the helper columns
 mergedData <- foverlaps(compuStat, newPrices)[, (deletecols) := NULL]
@@ -280,15 +280,14 @@ mergedData <- foverlaps(compuStat, newPrices)[, (deletecols) := NULL]
 # mergedData2 = newPrices[compuStat, on = .(gvkey, datadate >= start, datadate <= end)]
 
 
-mergedData = mergedData[order(mergedData$gvkey, mergedData$iid, -mergedData$datadate, -mergedData$fdateq),]
+mergedData = mergedData[order(mergedData$gvkey, -mergedData$datadate, -mergedData$fdateq),]
 finalPriceData = mergedData[!duplicated(cbind(mergedData$fdateq,
-                                                mergedData$gvkey,
-                                                mergedData$iid)),]
+                                                mergedData$gvkey)),]
 
-finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$iid, finalPriceData$fdateq),] #iid is "Issue ID"
+finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$fdateq),] 
 
 #Remove non-primary IDs
-finalPriceData = finalPriceData[finalPriceData$iid==finalPriceData$prirow,]
+#finalPriceData = finalPriceData[finalPriceData$iid==finalPriceData$prirow,]
 
 fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 
@@ -348,11 +347,10 @@ returnData = cbind("returns" = returns, "MktCap" = MktCap[-length(MktCap)], fina
 
 
 
-#1 is there because I already dropped the first row when calculating returns
-duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
-duplicates[1] = TRUE
-
-returnData = returnData[duplicates,]
+# #1 is there because I already dropped the first row when calculating returns
+# duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
+# duplicates[1] = TRUE
+#returnData = returnData[duplicates,]
 
 fwrite(returnData,"Data/finalData.csv", row.names = FALSE)
 
@@ -364,6 +362,11 @@ returnData2 = finalPriceData
 returnData2 = returnData2[, "returns" := c(ret(prccd, trfd, ajexdi), NA), by = gvkey]
 returnData2 = returnData2[, "MktCap" := MktCapFunction(prccd, cshoc)]
 returnData2 = returnData2[!is.na(returnData2$returns),]
+
+
+# duplicates = duplicated(cbind(returnData$gvkey, returnData$iid))
+# duplicates[1] = TRUE
+# returnData = returnData[duplicates,]
 
 
 fwrite(returnData2,"Data/finalData.csv", row.names = FALSE)
@@ -564,7 +567,7 @@ require(data.table)
 finalData <- fread("Data/finalData.csv")
 
 #prirow is the "primary issue tag". Only use primary issue
-finalData=finalData[finalData$iid==finalData$prirow,]
+#finalData=finalData[finalData$iid==finalData$prirow,]
 
 #Removing Unncecessary variables 
 variableNames = c("returns", "MktCap", "gvkey", "fdateq", "datadate", "datacqtr", "curcdq","accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "capxy", "chechy", "cogsy", "dfxay", "dpcy", "dpy", "fincfy", "fopoy", "gpy", "ibcy", "ibmiiy", "iby", "idity", "ivncfy", "ltdchy", "nopioy", "nopiy", "oancfy", "oiadpy", "oibdpy", "piy", "recchy", "revty", "saley", "txty", "wcapopcy", "xinty", "xoproy", "xopry", "xsgay", "exchg", "fic", "city", "fyrc", "ggroup", "gind", "gsector", "gsubind", "idbflag", "loc", "naics", "sic")
@@ -605,18 +608,18 @@ YXfactor = YX
 factorCols = c("gvkey", "curcdq", "exchg", "fic", "city", "fyrc",
         "ggroup", "gind", "gsector", 
         "gsubind", "idbflag", "loc", 
-        "naics", "sic", "fdateq", "datadate", "datacqtr")
+        "naics", "sic", "fdateq", "datadate")#, "datacqtr")
 
 YXfactor[, c(factorCols) := lapply(.SD, factor), .SDcols = c(factorCols)]
 
 #Create date objects
-YXfactor$fdateq = as.Date(YXfactor$fdateq, format = '%Y%m%d')
-YXfactor$datadate = as.Date(YXfactor$datadate, format = '%Y%m%d')
-YXfactor$datacqtr = zoo::as.yearqtr(YXfactor$datacqtr, format = "%YQ%q")
+# YXfactor$fdateq = as.Date(YXfactor$fdateq, format = '%Y%m%d')
+# YXfactor$datadate = as.Date(YXfactor$datadate, format = '%Y%m%d')
+# YXfactor$datacqtr = zoo::as.yearqtr(YXfactor$datacqtr, format = "%YQ%q")
 
 
 #Remove non-numerics
-finalNumericData = Filter(is.numeric, YXfactor[, -c("gvkey", "fdateq")])
+finalNumericData = Filter(is.numeric, YXfactor[, -c("gvkey", "fdateq", "MktCap")])
 #sum(is.na(finalNumericData))
 finalNumericData = na.omit(finalNumericData)
 
@@ -678,7 +681,7 @@ ggplot(data = YXfactor, aes(x = datacqtr, fill = Split)) +
 
 
 
-fwrite(YXfactor,"Data/YXWithSplit.csv", row.names = FALSE)
+#fwrite(YXfactor,"Data/YXWithSplit.csv", row.names = FALSE)
 
 
 
@@ -707,6 +710,9 @@ max(finalData$returns, na.rm = T) #4561.336
 
 ```{r TrainTestSplit_QuarterlySplit}
 
+#YXfactor <- fread("Data/YXWithSplit.csv")
+
+
 finalData = YXfactor
 
 #sorting
@@ -720,6 +726,15 @@ trainValidationSize = 1:(splitPoint-1)
 
 testSet = quarterGroups[testSize]
 trainValidation =  quarterGroups[trainValidationSize]
+
+
+
+
+
+testSet = YXfactor[YXfactor$Split=="Test",]
+testSet$datacqtr = factor(testSet$datacqtr)
+testSetQuarters = split(testSet, testSet$datacqtr)
+
 
 
 #Checking if the data periodization makes sense
@@ -1554,13 +1569,13 @@ write.csv2(quarterlyFactors, "FactorData/quarterlyFactors.csv", row.names = FALS
 
 ```{r LoadKerasModelFromPython}
 
-fs::dir_tree("Results/BestKerasModel2")
+fs::dir_tree("Results/BestKerasModel5")
 
 #library(tensorflow)
 library(keras)
 
 
-model <- keras::load_model_tf('Results/BestKerasModel3')
+model <- keras::load_model_tf('Results/BestKerasModel5')
 
 # Check its architecture
 summary(model)
@@ -1608,7 +1623,7 @@ summary(model)
 
 ```{r Predict}
 require(data.table)
-ScaledWinsRatioData <- fread("Data/ScaledWinsRatioData.csv")
+#ScaledWinsRatioData <- fread("Data/ScaledWinsRatioData.csv")
 
 
 library(magrittr)
@@ -1616,17 +1631,29 @@ library(keras) #Contains "keras_model_sequential" function
 
 
 
+
+testSet = YXfactor[YXfactor$Split=="Test",-c("MktCap")]
+#testSet$datacqtr = factor(testSet$datacqtr)
+#testSet$datacqtr = as.numeric(testSet$datacqtr)
+#testSetNumericData = Filter(is.numeric, testSet[, -c("gvkey", "fdateq", "MktCap")])
+#sum(is.na(finalNumericData))
+#testSetNumericData = na.omit(testSetNumericData)
+
+#testSetQuarters = split(testSetNumericData, testSetNumericData$datacqtr)
+testSetQuarters = split(testSet, testSet$datacqtr)
+testSet = testSetQuarters
+
 #Prediction
 allPreds = list(); m = 1
 for(n in testSet){
   
   cat("Model number", m)
-  pooled = Filter(function(x) {is.numeric(x)|is.factor(x)}, n)
+  pooled = Filter(function(x) {is.numeric(x)}, n) #|is.factor(x)
   
   pooled = na.omit(pooled)
-  testX = pooled[, c("fdateq"):=NULL]  #c("gvkey"
+  testX = pooled[, c("datacqtr"):=NULL]  #c("gvkey", "fdateq", 
   testX = stats::model.matrix(returns ~ ., testX)[,-1]
-  testX = apply(testX, MARGIN = 2, scale)
+  #testX = apply(testX, MARGIN = 2, scale)
   testY = pooled$returns
   
   
@@ -1671,26 +1698,48 @@ rf0 = quarterlyFactors[YQ %in% cqtr]$RF
 
 
 
+trainValidation = YXfactor[YXfactor$Split!="Test",-c("MktCap")]
+pooledForVariance = trainValidation[, c("gvkey", "datacqtr", "returns")]
 
 # #For creating a covariance matrix
 # pooledForVariance = do.call(rbind, trainValidation)
 # pooledForVariance = as.data.table(pooledForVariance[, c("gvkey", "datacqtr", "returns")])
 # # pooledForVariance = pooledForVariance[gvkey %in% firmPreds$gvkey,]
-# # 
+# #
 # # returnMatrix<-dcast.data.table(data=pooledForVariance, datacqtr~gvkey)
 # # dim(returnMatrix[,!"datacqtr"])
 # # length(as.matrix(returnMatrix))
 # # sum(is.na(returnMatrix))
-# # 
+# #
 # # V = cov(returnMatrix[, !"datacqtr"])
 
 
+# a = dcast.data.table(data=pooledForVariance, datacqtr~gvkey, value.var="returns")
+# b = duplicated(pooledForVariance[,-c(returns)])
+# d = pooledForVariance[b,]
+# sum(duplicated(d[,-c(returns)]))
 
+
+pooledForVariance = pooledForVariance[, "returns" := mean(returns, na.rm = T), by = c("gvkey", "datacqtr")]
+pooledForVariance = unique(pooledForVariance)
 
 pooledForVarianceList = lapply(allPreds, function(x) pooledForVariance[gvkey %in% x$gvkey,])
-returnMatrixList = lapply(pooledForVarianceList, function(x) dcast.data.table(data=x, datacqtr~gvkey))
-VList = lapply(returnMatrixList, function(x) cov(x[, !"datacqtr"]))
+returnMatrixList = lapply(pooledForVarianceList, function(x) dcast.data.table(data=x, datacqtr~gvkey, value.var="returns"))
+VList = lapply(returnMatrixList, function(x) cov(x[, !"datacqtr"], use="pairwise.complete.obs"))
+#VList = lapply(returnMatrixList, function(x) cov(x[, !"datacqtr"], use="complete.obs"))
 
+
+
+# V=VList[[10]]
+# View(V)
+# colSums(is.na(V))
+# rowSums(is.na(V))
+
+VListLessNA = lapply(VList, function(x) x[rowSums(is.na(x)) != ncol(x), colSums(is.na(x)) != nrow(x)])
+VListLessNA = lapply(VListLessNA, function(x) x[rowSums(is.na(x)) < ncol(x)/5+1, colSums(is.na(x)) < nrow(x)/5+1])
+VListLessNA = lapply(VListLessNA, function(x) x[rowSums(is.na(x)) == 0, colSums(is.na(x)) == 0])
+# V=VListLessNA[[10]]
+# View(V)
 
 
 
@@ -1698,7 +1747,10 @@ VList = lapply(returnMatrixList, function(x) cov(x[, !"datacqtr"]))
 # RwithTickers = firmPreds[gvkey %in% pooledForVariance$gvkey,]
 # R = RwithTickers$V1
 
-RwithTickers = lapply(allPreds, function(x) x[gvkey %in% pooledForVariance$gvkey,])
+# RwithTickers = lapply(allPreds, function(x) x[gvkey %in% pooledForVariance$gvkey,])
+# R = lapply(RwithTickers, function(x) x$V1)
+
+RwithTickers = lapply(allPreds, function(x) x[gvkey %in% colnames(VListLessNA),])
 R = lapply(RwithTickers, function(x) x$V1)
 
 # #RAndRF = list(R=R, rf0=rf0)
@@ -1734,15 +1786,15 @@ for(n in 1:length(rf0)){
 # #matrixcalc::is.positive.semi.definite(V)
 # 
 # 
-# 
+# V=VList[[10]]
 # #packages for taking inverses of matrices
-# # inverse = Rfast::spdinv(V)
-# # inverse = mnormt::pd.solve(V)
-# # inverse = chol2inv(chol(V))
-# # inverse = solve(V)
+# inverse = Rfast::spdinv(V)
+# inverse = mnormt::pd.solve(V)
+# inverse = chol2inv(chol(V))
+# inverse = solve(V)
 # inverse = MASS::ginv(V)
-# # inverse = matlib::inv(V)
-# #View(V[1:10,1:10])
+# inverse = matlib::inv(V)
+# View(V[1:10,1:10])
 # 
 # 
 # length(inverse)
@@ -1768,7 +1820,9 @@ for(n in 1:length(rf0)){
 
 
 #Invert
-invList = lapply(VList, MASS::ginv)
+invList = lapply(VListLessNA, MASS::ginv)
+#invList = lapply(VList, Rfast::spdinv)
+
 
 #Equivalent solution with lists
 weights=list()
@@ -1791,8 +1845,7 @@ for(n in 1:length(weights)) {
 }
 
 
-
-
+testSet = testSetQuarters #From earlier in the script: TrainTestSplit_QuarterlySplit
 portfolioWithRealizedList = list()
 for(n in 1:length(weights)) {
   
