@@ -513,13 +513,12 @@ require(data.table)
 returnData <- fread("Data/returnsData.csv")
 cleanData <- fread("Data/CleanDataQ.csv")
 
-# #Remove firms with large fdateq-datadate discrepancy
-# cleanData$fdateqDateObject = as.Date(as.character(cleanData$fdateq), format = "%Y%m%d")
-# cleanData$datadate = as.Date(as.character(cleanData$datadate), format = "%Y%m%d")
-# cleanData[, "TimeDifferenceInDays" := difftime(fdateqDateObject, datadate)]
+#Remove firms with large fdateq-datadate discrepancy
+cleanData$fdateqObject = as.Date(as.character(cleanData$fdateq), format = "%Y%m%d")
+cleanData$datadateObject = as.Date(as.character(cleanData$datadate), format = "%Y%m%d")
+cleanData[, "TimeDifferenceInDays" := difftime(fdateqObject, datadateObject)]
 # View(cleanData[1:1000,])
-# 
-# #fundamentalsData = cleanData[TimeDifferenceInDays<180,]
+#tail(sort(cleanData$TimeDifferenceInDays), 50)
 # 
 # #Create fdateq YearQuarter variable
 # 
@@ -532,8 +531,14 @@ cleanData[quarter == 0, ":=" ("quarter" = 4, "year" = year-1)]
 
 setkey(cleanData, gvkey, year, quarter)
 
+#Does this remove the data with the largest date gaps? (Between fdateq and datadate)
 fundamentalsData = unique(cleanData, fromLast=T, by = key(cleanData))
+mean(as.numeric(cleanData$TimeDifferenceInDays)); mean(as.numeric(fundamentalsData$TimeDifferenceInDays));
+
 #View(fundamentalsData[1:1000,])
+#tail(sort(fundamentalsData$TimeDifferenceInDays), 50)
+fundamentalsData = fundamentalsData[TimeDifferenceInDays<100,]
+#hist(as.numeric(fundamentalsData$TimeDifferenceInDays), breaks=100)
 
 #Combine datasets
 setkey(fundamentalsData, gvkey, year, quarter)
@@ -794,7 +799,8 @@ mergedData <- fread("Data/mergedDataWithSplit.csv")
 # #YX = lapply(YXfactor, function(x){x[, ..variableNames]})
 # #YX = lapply(YX, function(x){na.omit(x)})
 # YX = finalData[, ..variableNames]
-finalData = mergedData[, c("year", "quarter", "month", "datadate.price", "datadate.fund", "fdateq", "pdateq", "datacqtr"):=NULL]
+finalData = mergedData[, c("year", "quarter", "month", "datadate.price", "datadate.fund", 
+                           "fdateq", "datacqtr", "TimeDifferenceInDays", "fdateqObject", "datadateObject"):=NULL]
 colnames(finalData)[colnames(finalData) == 'quarterlyReturns'] <- 'returns'
 #View(finalData[1:1000,])
 
