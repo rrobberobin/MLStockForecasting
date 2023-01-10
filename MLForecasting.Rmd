@@ -1826,7 +1826,7 @@ for(q in quarters){
 
 ```
 
-```{r TangencyPortfolio}
+```{r Combine predictions and factors}
 
 quarterlyFactors=fread("FactorData/quarterlyFactors.csv")
 
@@ -1893,6 +1893,30 @@ predsFactorsMerged[, ":=" ("NNER"=BestModelPred - RFpred,
 #   YX[YX$fdateYQ == YX[n,]$fdateYQ & YX$gvkey == YX[n,]$gvkey, ":=" ("firmMeanPred" = ans)]
 #   if(n%%1000 == 0) print(n)
 # }
+
+```
+
+
+```{r DieboldMariano}
+
+
+#MSE-F
+
+#OOS R-squared  = MSE / MSE0 = (compare best model to NaiveZeroPrediction)
+
+#predsFactorsMerged
+
+#Something like this (pseudocode):
+#allPerformances["BestModelMSE"] / allPerformances["NaiveZeroMSE"]
+
+
+```
+
+
+
+```{r TangencyPortfolio}
+
+
 
 
 #sharpeMaximizingWeights = function(inputPredReturn){#################################################################
