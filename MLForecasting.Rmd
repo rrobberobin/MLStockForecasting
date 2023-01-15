@@ -276,16 +276,15 @@ View(data[data$updq!=3,][1:100,])
 #almost all data is final (update code 3, instead of 2)
 #I will use "fdateq" as a conservative approach
 
+#prirow is the "primary issue tag". Only use primary issue
+newPrices = prices[prices$iid == prices$prirow, -c("iid", "prirow")]
 
 #reduce data size
-removeGVKEY = prices[prices$gvkey %in% cleanData$gvkey,]
+newPrices = newPrices[newPrices$gvkey %in% cleanData$gvkey,]
 
 #Oldest date in cleanData is 2009/11/30
 min(cleanData$fdateq)
-newPrices = removeGVKEY[removeGVKEY$datadate>=(min(cleanData$fdateq)-300),]
-
-#prirow is the "primary issue tag". Only use primary issue
-newPrices = newPrices[newPrices$iid == newPrices$prirow, -c("iid", "prirow")]
+newPrices = newPrices[newPrices$datadate>=(min(cleanData$fdateq)-300),]
 
 
 fwrite(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
@@ -336,7 +335,7 @@ fwrite(newPrices,"Data/CleanPrices.csv", row.names = FALSE)
 ```{r combineFundamentalsAndPrices}
 
 require(data.table)
-newPrices <- fread("Data/CleanPrices.csv")
+#newPrices <- fread("Data/CleanPrices.csv")
 cleanData <- fread("Data/CleanDataQ.csv")
 setkey(newPrices, gvkey, datadate)
 
@@ -402,7 +401,7 @@ finalPriceData = finalPriceData[order(finalPriceData$gvkey, finalPriceData$fdate
 #Remove non-primary IDs
 #finalPriceData = finalPriceData[finalPriceData$iid==finalPriceData$prirow,]
 
-fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
+#fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 
 
 #Write into word doc:
@@ -426,8 +425,8 @@ fwrite(finalPriceData,"Data/finalPriceData.csv", row.names = FALSE)
 
 
 ```{r calculateReturnsAndMktCap}
-require(data.table)
-finalPriceData <- fread("Data/finalPriceData.csv")
+#require(data.table)
+#finalPriceData <- fread("Data/finalPriceData.csv")
 
 #View price data in wide format
 #widePrices = dcast(finalPriceData, datadate~gvkey + iid, value.var = "prccd")
@@ -442,10 +441,13 @@ ret = function(price, returnFactor, adjustmentFactor) {
   (numerator/denominator-1) * 100
 }
 
-MktCapFunction = function(price, sharesOutstanding) {
-  price * sharesOutstanding
+logret = function(price, returnFactor, adjustmentFactor) {
+  n = length(price)
+  numerator = returnFactor[-1]*price[-1]/adjustmentFactor[-1]
+  denominator = (returnFactor[-n]*price[-n]/adjustmentFactor[-n])
+  
+  exp(log(numerator)-log(denominator))-1
 }
-
 
 
 # returnData = finalPriceData
@@ -453,45 +455,122 @@ MktCapFunction = function(price, sharesOutstanding) {
 # returnData = returnData[, "MktCap" := MktCapFunction(prccd, cshoc)]
 # returnData = returnData[!is.na(returnData$returns),]
 
+require(data.table)
+# returnData = fread("Data/CleanPrices.csv")
+prices <- fread("Data/OriginalData/CompustatPrices.csv")
+returnData = prices[prices$iid == prices$prirow, -c("iid", "prirow")]
 
-newPrices = fread("Data/CleanPrices.csv")
-returnData = newPrices
-returnData[, ":=" ("returns" = c(ret(prccd, trfd, ajexdi), NA), 
+returnData[, ":=" ("adjustedPrice" = prccd * trfd / ajexdi)]
+returnData[, "MktCap" := prccd * cshoc]
+returnData[, c("cshoc", "prccd", "trfd", "ajexdi"):=NULL]
+colnames(returnData)
+
+# returnData[, ":=" ("returns" = c(ret(prccd, trfd, ajexdi), NA), 
+#                    "daysByFirm" = length(datadate)), 
+#            by = gvkey]
+returnData[, ":=" ("returns" = c(adjustedPrice[-1]/adjustedPrice[-length(adjustedPrice)], NA), 
                    "daysByFirm" = length(datadate)), 
            by = gvkey]
-returnData[, "MktCap" := MktCapFunction(prccd, cshoc)]
+
 
 returnData[, "year" := floor(datadate/10^4)]
 returnData[, "month" := floor((datadate/10^2) %% 10^2)]
 returnData[, "quarter" := ceiling((month-1)/3)]
 returnData[quarter == 0, ":=" ("quarter" = 4, "year" = year-1)]
-View(returnData[1:5000,])
+#returnData[, ":=" ("YearQuarter" = paste(year, quarter, sep = "Q")), , by=c("year", "quarter")]
+returnData[, ":=" ("YearQuarter" = year + (quarter-1)/4)] #This is faster
+returnData[, ":=" ("YearMonth" = year + (month-1)/12)]
+View(returnData[1:500,])
 
 returnData[, ":=" ("monthlyReturns" = c((prod(returns/100+1, na.rm = T) - 1)*100), 
+                   "monthlyVolatility" = c(sd(returns/100, na.rm = T)*sqrt(252)), 
                    "daysInMonth" = length(datadate)), 
            by = list(gvkey, year, month)]
+
+returnData[, ":=" ("monthlyReturns" =c((prod(returns/100+1, na.rm = T) - 1)*100)), 
+           by = list(gvkey, year, month)]
+
+
+# system.time(returnData[1:10000000, c((prod(returns/100+1, na.rm = T) - 1)*100),
+#            by = list(gvkey, year, month)])
+# system.time(returnData[1:10000000, c((prod(returns/100+1, na.rm = T) - 1)*100),
+#            by = list(gvkey, YearMonth)])
+# system.time(returnData[1:10000000, c(adjustedPrice[length(adjustedPrice)]/adjustedPrice[1], NA),
+#            by = list(gvkey, YearMonth)])
+# system.time(returnData[1:10000000, c(exp(adjustedPrice[length(adjustedPrice)] - adjustedPrice[1])-1, NA),
+#            by = list(gvkey, YearMonth)])
+
+# system.time(returnData[1:1000000, c(ret(prccd, trfd, ajexdi), NA), 
+#            by = list(gvkey, year, month)])
+# system.time(returnData[1:1000000, c(logret(prccd, trfd, ajexdi), NA), 
+#            by = list(gvkey, year, month)])
+# View(returnData[1:500,])
+
+
+# returnData[, ":=" ("monthlyReturns" = c(ret(prccd, trfd, ajexdi), NA), 
+#                    "monthlyVolatility" = c(sd(returns/100, na.rm = T)*sqrt(252)), 
+#                    "daysInMonth" = length(datadate)), 
+#            by = list(gvkey, year, month)]
+
+# prod(returnData$returns[1:1000]/100+1, na.rm = T) - 1
+# exp(log(returnData$prccd[1001]*returnData$trfd[1001]/returnData$ajexdi[1001])
+#     - log(returnData$prccd[2]*returnData$trfd[2]/returnData$ajexdi[2])) - 1
+
+
 returnData[, ":=" ("quarterlyReturns" = c((prod(returns/100+1, na.rm = T) - 1)*100), 
+                   "quarterlyVolatility" = c(sd(returns/100, na.rm = T)*sqrt(252)), 
                    "daysInQuarter" = length(datadate)), 
-           by = list(gvkey, year, quarter)]
+           by = list(gvkey, YearQuarter)]
+# returnData[, ":=" ("yearlyReturns" = c((prod(returns/100+1, na.rm = T) - 1)*100), 
+#                    "yearlyVolatility" = c(sd(returns/100, na.rm = T)*sqrt(252)), 
+#                    "daysInQuarter" = length(datadate)), 
+#            by = list(gvkey, year)]
 
-# returnData[, "yearlyReturns" := c((prod(returns/100+1, na.rm = T) - 1)*100), by = list(gvkey, year)]
-View(returnData[1:5000,])
+#View(returnData[1:5000,])
+#colSums(is.na(returnData))
+#View(returnData[!complete.cases(returnData), ])
 
-returnData = returnData[!is.na(returnData$returns),]
+#monthlyReturnData = returnData[!is.na(returnData$returns),]
 monthlyReturnData = unique(returnData, by=c("gvkey", "year", "month"))
-monthlyReturnData[, "monthlyReturns-1" := c(monthlyReturns[-1], NA), by = gvkey]
-monthlyReturnData[, "monthlyReturns-2" := c(monthlyReturns[-c(1:2)], rep(NA, 2)), by = gvkey]
-monthlyReturnData[, "monthlyReturns-3" := c(monthlyReturns[-c(1:3)], rep(NA, 3)), by = gvkey]
-
+monthlyReturnData = na.omit(monthlyReturnData)
 monthlyReturnData = monthlyReturnData[, "totalMonthlyObservations" := length(datadate), by = gvkey]
 #duplicated(monthlyReturnData, by=c("gvkey", "yearMonth"))
-View(monthlyReturnData[1:5000,])
+#View(monthlyReturnData[1:5000,])
+colSums(is.na(monthlyReturnData))
 
-quarterlyReturnData = monthlyReturnData[,c("gvkey", "datadate", "year", "quarter", "curcdd", "quarterlyReturns", "MktCap")]
-quarterlyReturnData = unique(quarterlyReturnData, by=c("gvkey", "year", "quarter"))
-View(quarterlyReturnData[1:5000,])
 
-fwrite(quarterlyReturnData,"Data/returnsData.csv", row.names = FALSE)
+fwrite(monthlyReturnData,"Data/monthlyReturnData.csv", row.names = FALSE)
+
+
+# quarterlyReturnData = monthlyReturnData[,c("gvkey", "datadate", "year", "quarter", "curcdd", 
+#                                            "quarterlyReturns", "quarterlyVolatility", "MktCap", "YearQuarter")]
+quarterlyReturnData = unique(monthlyReturnData, by=c("gvkey", "year", "quarter"))
+
+
+for(lag in 1:4){
+  quarterlyReturnData[, paste("quarterlyReturns", lag, sep = "-") := c(rep(NA, min(lag, length(quarterlyReturns))), 
+                                                                       head(quarterlyReturns, -lag)), by = gvkey]
+  
+  quarterlyReturnData[, paste("quarterlyVolatility", lag, sep = "-") := c(rep(NA, min(lag, length(quarterlyVolatility))),
+                                                                          head(quarterlyVolatility, -lag)), by = gvkey]
+  print(lag)
+}
+
+
+for(lag in 2:5){
+  quarterlyReturnData[, paste0("past", lag, "YearReturn") 
+                      := (Reduce(`*`, shift(quarterlyReturns/100 + 1, 0:(lag*4), type="lag")) - 1)*100, by = gvkey][]
+  
+  quarterlyReturnData[, paste0("past", lag, "YearVolatility") 
+                      := c(NA, RcppRoll::roll_sd(quarterlyReturns[-length(quarterlyReturns)]/100, 
+                                                 n = lag*4, fill = NA, na.rm = F, align = c("right"))
+                           *sqrt(252)), 
+                      by = gvkey][]
+  print(lag)
+}
+#View(quarterlyReturnData[1:5000,])
+
+#fwrite(quarterlyReturnData,"Data/returnsData.csv", row.names = FALSE)
 
 
 
@@ -502,7 +581,6 @@ fwrite(quarterlyReturnData,"Data/returnsData.csv", row.names = FALSE)
 # duplicates[1] = TRUE
 # returnData = returnData[duplicates,]
 
-fwrite(monthlyReturnData,"Data/monthlyReturnData.csv", row.names = FALSE)
 
 
 ```
@@ -512,13 +590,14 @@ fwrite(monthlyReturnData,"Data/monthlyReturnData.csv", row.names = FALSE)
 require(data.table)
 returnData <- fread("Data/returnsData.csv")
 cleanData <- fread("Data/CleanDataQ.csv")
+View(returnData[1:100,])
 
 #Remove firms with large fdateq-datadate discrepancy
 cleanData$fdateqObject = as.Date(as.character(cleanData$fdateq), format = "%Y%m%d")
 cleanData$datadateObject = as.Date(as.character(cleanData$datadate), format = "%Y%m%d")
 cleanData[, "TimeDifferenceInDays" := difftime(fdateqObject, datadateObject)]
-# View(cleanData[1:1000,])
-#tail(sort(cleanData$TimeDifferenceInDays), 50)
+View(cleanData[1:1000,])
+tail(sort(cleanData$TimeDifferenceInDays), 50)
 # 
 # #Create fdateq YearQuarter variable
 # 
@@ -552,7 +631,6 @@ mergedData = merge(returnData, fundamentalsData,
 mergedData = mergedData[curcdd==curcdq, !c("curcdd", "curcdq")]
 
 fwrite(mergedData, "Data/mergedData.csv", row.names = FALSE)
-
 
 ```
 
@@ -709,8 +787,9 @@ factorCols = c("gvkey", "fdateYQ", "Split", "naics", "loc", "city",
 # sortedQuarters = sort(unique(YXfactor$datacqtr))
 
 
-
+require(data.table)
 mergedData <- fread("Data/mergedData.csv")
+mergedData = na.omit(mergedData)
 
 mergedData$fdateYQ = paste(mergedData$year, mergedData$quarter, sep="Q")
 mergedData$fdateYQ = zoo::as.yearqtr(mergedData$fdateYQ, format="%YQ%q")
@@ -724,10 +803,8 @@ years = quarters/4
 
 sortedQuarters = sort(unique(mergedData$fdateYQ))
 
-
-
 trainValidSplitPoint = round(quarters*0.6)
-validTestSplitPoint = round(quarters*0.8)
+validTestSplitPoint = round(quarters*0.85)
 
 trainQuarters = sortedQuarters[1:trainValidSplitPoint]
 validQuarters = sortedQuarters[(trainValidSplitPoint+1):validTestSplitPoint]
@@ -742,8 +819,18 @@ tTVSplitFunction = function(x){
 mergedData[, "Split" := sapply(fdateYQ, tTVSplitFunction)]
 #YXfactor$Split = factor(YXfactor$Split)
 #View(mergedData[1:1000,])
+table(mergedData[, "Split"]); prop.table(table(mergedData[, "Split"]))
+# splitFrequencies = rbind(table(mergedData[, "Split"]), 
+#                                prop.table(table(mergedData[, "Split"])))
+splitFrequencies = rbind(
+  table(mergedData$Split), 
+  round(prop.table(table(mergedData$Split)), 2)
+                         )
+splitFrequencies = format(splitFrequencies[,c("Train", "Validation", "Test")], 
+                          scientific = FALSE, trim=T, zero.print =F,  drop0trailing=T)
+splitFrequencies
 
-fwrite(mergedData,"Data/mergedDataWithSplit.csv", row.names = FALSE)
+#fwrite(mergedData,"Data/mergedDataWithSplit.csv", row.names = FALSE)
 
 ```
 
@@ -766,7 +853,11 @@ ggplot(data = mergedData, aes(x = fdateYQ, fill = Split)) +
   labs(title = "Train-Validation-Test Quarterly Split",
        subtitle = dataRange, 
        x = "Quarter", y = "Observations") + 
-  zoo::scale_x_yearqtr(format = '%Y', n = years)
+  zoo::scale_x_yearqtr(format = '%Y', n = years) +
+  scale_fill_discrete(breaks=c('Train', 'Validation', 'Test'))
+
+ggsave(filename=paste0("Descr/DescrFigures/TrainValidationTestQuarterlyPlot_", Sys.Date(), ".png"),
+       device="png")
 
 
 
@@ -785,24 +876,51 @@ ggplot(data = mergedData, aes(x = fdateYQ, fill = Split)) +
 
 ```
 
-
-```{r removingExtraVariables}
+```{r EncodingForClassification}
 require(data.table)
 mergedData <- fread("Data/mergedDataWithSplit.csv")
+
+#EncodingForClassification
+require(dplyr)
+mergedData[, ":=" ("2Classes" = ntile(quarterlyReturns, 2), 
+                  "4Classes" = ntile(quarterlyReturns, 4), 
+                  "6Classes" = ntile(quarterlyReturns, 6), 
+                  "8Classes" = ntile(quarterlyReturns, 8), 
+                  "10Classes" = ntile(quarterlyReturns, 10)), by = c("YearQuarter")]
+#View(mergedData[1:100,c("gvkey", "YearQuarter", "quarterlyReturns", "2Classes", "4Classes", "6Classes", "8Classes", "10Classes")])
+
+# mergedData[, ":=" ("2Classes" = if(median(quarterlyReturns)>=quarterlyReturns) 2 else 1, 
+#                   "4Classes" = ntile(quarterlyReturns, 4)), by = c("YearQuarter")]
+
+```
+
+
+```{r removingExtraVariables}
 #View(mergedData[1:1000,])
 
 
 # #Removing Unnecessary variables 
 # variableNames = c("returns", "MktCap", "gvkey", "fdateq", "datadate", "datacqtr", "accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "loc", "city", "naics", "acctstdq", "bsprq", "compstq", "scfq", "staltq")
-# 
-# 
+
+crucialNames = c("gvkey", "fdateYQ", "quarterlyReturns", "quarterlyVolatility", "MktCap", "Split")
+
+dummyNames = c("naics", "loc", "city", "acctstdq", "compstq")
+numericalNames = c("accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq")
+
+laggedVolAndRetNames = c("quarterlyReturns-1", "quarterlyReturns-2", "quarterlyReturns-3", "quarterlyReturns-4", "quarterlyVolatility-1",  "quarterlyVolatility-2", "quarterlyVolatility-3", "quarterlyVolatility-4", "past2YearReturn", "past3YearReturn", "past4YearReturn", "past5YearReturn", "past2YearVolatility", "past3YearVolatility", "past4YearVolatility", "past5YearVolatility")
+labelNames = c("2Classes", "4Classes", "6Classes", "8Classes", "10Classes")
+
+newVariableNames = c(crucialNames, dummyNames, numericalNames, laggedVolAndRetNames, labelNames)
+
 # #YX = lapply(YXfactor, function(x){x[, ..variableNames]})
 # #YX = lapply(YX, function(x){na.omit(x)})
 # YX = finalData[, ..variableNames]
-finalData = mergedData[, c("year", "quarter", "month", "datadate.price", "datadate.fund", 
-                           "fdateq", "datacqtr", "TimeDifferenceInDays", "fdateqObject", "datadateObject"):=NULL]
+# finalData = mergedData[, c("year", "quarter", "month", "datadate.price", "datadate.fund", 
+#                            "fdateq", "datacqtr", "TimeDifferenceInDays", "fdateqObject", "datadateObject"):=NULL]
+finalData = mergedData[, newVariableNames, with=F]
 colnames(finalData)[colnames(finalData) == 'quarterlyReturns'] <- 'returns'
-#View(finalData[1:1000,])
+colnames(finalData)[colnames(finalData) == 'quarterlyVolatility'] <- 'volatility'
+#View(finalData[1:100,])
 
 
 # #removeMissingCalendarData. I could probably manually add these three instead. A simple script for adding
