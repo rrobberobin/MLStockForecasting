@@ -48,8 +48,8 @@ knitr::opts_chunk$set(echo = TRUE)
 #2 414 247 obs. of  408 =>
 
 #Import data. The data includes both industrials and banks
-require(data.table)
-data <- fread("Data/OriginalData/FundamentalsQuarterly.csv")
+require(data.table); #setDTthreads(0L
+data <- fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=getDTthreads(verbose), select=NULL)
 # #orderedData = data[order(names(data))]
 # #setcolorder(data, order(names(data)))
 # #orderedData = setorderv(data, order(names(data)))[]
@@ -254,7 +254,7 @@ write.csv(temporalFrequencyTable, "Descr/temporalFrequencyTable.csv")
 
 #Import price data
 require(data.table)
-prices <- fread("Data/OriginalData/CompustatPrices.csv")
+prices <- fread("Data/OriginalData/CompustatPrices.csv", nThread=getDTthreads(verbose), select=NULL)
 #221 835 959 x 6
 
 
