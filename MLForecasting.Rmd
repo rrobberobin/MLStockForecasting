@@ -909,6 +909,28 @@ mergedData[, ":=" ("2Classes" = ntile(quarterlyReturns, 2),
                   "6Classes" = ntile(quarterlyReturns, 6), 
                   "8Classes" = ntile(quarterlyReturns, 8), 
                   "10Classes" = ntile(quarterlyReturns, 10)), by = c("YearQuarter")]
+
+
+mergedData[`2Classes` %in% 1, "Simple2Classes" := 0]
+mergedData[`2Classes` %in% 2, "Simple2Classes" := 1]
+
+mergedData[`4Classes` %in% 1, "Simple4Classes" := 0]
+mergedData[`4Classes` %in% 2:3, "Simple4Classes" := 1]
+mergedData[`4Classes` %in% 4, "Simple4Classes" := 2]
+
+mergedData[`6Classes` %in% 1, "Simple6Classes" := 0]
+mergedData[`6Classes` %in% 2:5, "Simple6Classes" := 1]
+mergedData[`6Classes` %in% 6, "Simple6Classes" := 2]
+
+mergedData[`8Classes` %in% 1, "Simple8Classes" := 0]
+mergedData[`8Classes` %in% 2:7, "Simple8Classes" := 1]
+mergedData[`8Classes` %in% 8, "Simple8Classes" := 2]
+
+mergedData[`10Classes` %in% 1, "Simple10Classes" := 0]
+mergedData[`10Classes` %in% 2:9, "Simple10Classes" := 1]
+mergedData[`10Classes` %in% 10, "Simple10Classes" := 2]
+
+
 #View(mergedData[1:100,c("gvkey", "YearQuarter", "quarterlyReturns", "2Classes", "4Classes", "6Classes", "8Classes", "10Classes")])
 
 # mergedData[, ":=" ("2Classes" = if(median(quarterlyReturns)>=quarterlyReturns) 2 else 1, 
@@ -930,7 +952,7 @@ mergedData$Subsector = as.numeric(substr(mergedData$naics, 1, 3))
 mergedData$IndustryGroup = as.numeric(substr(mergedData$naics, 1, 4))
 mergedData$Industry = as.numeric(substr(mergedData$naics, 1, 5))
 mergedData$NationalIndustry = as.numeric(substr(mergedData$naics, 1, 6))
-# View(mergedData[1:100,])
+View(mergedData[1:100,])
 # 
 # factor(mergedData$Sector)
 # factor(mergedData$Subsector)
@@ -975,7 +997,9 @@ industryNames = c("Sector", "Subsector", "IndustryGroup", "Industry", "NationalI
 numericalNames = c("accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq")
 
 laggedVolAndRetNames = c("quarterlyReturns-1", "quarterlyReturns-2", "quarterlyReturns-3", "quarterlyReturns-4", "quarterlyVolatility-1",  "quarterlyVolatility-2", "quarterlyVolatility-3", "quarterlyVolatility-4", "past2YearReturn", "past3YearReturn", "past4YearReturn", "past5YearReturn", "past2YearVolatility", "past3YearVolatility", "past4YearVolatility", "past5YearVolatility")
-labelNames = c("2Classes", "4Classes", "6Classes", "8Classes", "10Classes")
+
+labelNames = c("2Classes", "4Classes", "6Classes", "8Classes", "10Classes", 
+               "Simple2Classes", "Simple4Classes", "Simple6Classes", "Simple8Classes", "Simple10Classes")
 
 newVariableNames = c(crucialNames, dummyNames, industryNames, numericalNames, laggedVolAndRetNames, labelNames)
 
