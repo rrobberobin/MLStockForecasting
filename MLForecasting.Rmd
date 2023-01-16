@@ -49,13 +49,25 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #Import data. The data includes both industrials and banks
 require(data.table); #setDTthreads(0L
-data <- fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=getDTthreads(verbose), select=NULL)
+data <- fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=NULL)
+
+system.time(fread("Data/OriginalData/FundamentalsQuarterly.csv", select=c("naics")))
+system.time(fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=c("naics")))
+
+a = fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=c("naics"="character"))
+
 # #orderedData = data[order(names(data))]
 # #setcolorder(data, order(names(data)))
 # #orderedData = setorderv(data, order(names(data)))[]
 # 
 # #Look at data
 View(data[1:1000,])
+
+#Check if industry codes (GICS) are of type "historical" or "header" (i.e. not historical)
+#View(unique(data[1:10000,], by = c("gvkey", "gsubind", "sic", "naics")))
+anyDuplicated(
+  unique(data[, c("gvkey", "gsubind", "sic", "naics")], by = c("gvkey", "gsubind", "sic", "naics")), 
+               by = c("gvkey"))
 # names(data)
 # 
 # #Compare quarterly and YearToDate data. Remove yearly data?
@@ -70,7 +82,7 @@ relevantData = data[quarterIndex, ]
 #data = Filter(!data$datacqtr=="", data)
 
 
-variableNames = c("gvkey", "fdateq", "datadate", "datacqtr", "accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "loc", "city", "naics", "acctstdq",  "compstq", "curcdq")
+variableNames = c("gvkey", "fdateq", "datadate", "datacqtr", "accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "loc", "city", "naics", "sic", "acctstdq",  "compstq", "curcdq")
 
 relevantData = relevantData[, ..variableNames]
 
@@ -151,7 +163,7 @@ View(sumOfNotNA)
 #First: Remove columns with over half NA
 minimumNumberOfRows = nrow(relevantData)*0.5
 lessThanHalfNA = relevantData[, sumOfNotNA > minimumNumberOfRows, with=FALSE]
-View(lessThanHalfNA[1:1000,])
+#View(lessThanHalfNA[1:100,])
 
 
 # sumOfNotNA2 = colSums(!is.na(data))
@@ -590,13 +602,13 @@ for(lag in 2:5){
 require(data.table)
 returnData <- fread("Data/returnsData.csv")
 cleanData <- fread("Data/CleanDataQ.csv")
-View(returnData[1:100,])
+#View(returnData[1:100,])
 
 #Remove firms with large fdateq-datadate discrepancy
 cleanData$fdateqObject = as.Date(as.character(cleanData$fdateq), format = "%Y%m%d")
 cleanData$datadateObject = as.Date(as.character(cleanData$datadate), format = "%Y%m%d")
 cleanData[, "TimeDifferenceInDays" := difftime(fdateqObject, datadateObject)]
-View(cleanData[1:1000,])
+#View(cleanData[1:1000,])
 tail(sort(cleanData$TimeDifferenceInDays), 50)
 # 
 # #Create fdateq YearQuarter variable
@@ -789,6 +801,16 @@ factorCols = c("gvkey", "fdateYQ", "Split", "naics", "loc", "city",
 
 require(data.table)
 mergedData <- fread("Data/mergedData.csv")
+View(mergedData[1:100,])
+
+factor(mergedData$naics)
+factor(mergedData$sic)
+table(mergedData$naics)
+table(mergedData$sic)
+# sum(is.na(mergedData$naics))
+# sum(is.na(mergedData$sic))
+# colSums(is.na(mergedData))
+
 mergedData = na.omit(mergedData)
 
 mergedData$fdateYQ = paste(mergedData$year, mergedData$quarter, sep="Q")
@@ -830,7 +852,7 @@ splitFrequencies = format(splitFrequencies[,c("Train", "Validation", "Test")],
                           scientific = FALSE, trim=T, zero.print =F,  drop0trailing=T)
 splitFrequencies
 
-#fwrite(mergedData,"Data/mergedDataWithSplit.csv", row.names = FALSE)
+fwrite(mergedData,"Data/mergedDataWithSplit.csv", row.names = FALSE)
 
 ```
 
@@ -892,6 +914,48 @@ mergedData[, ":=" ("2Classes" = ntile(quarterlyReturns, 2),
 # mergedData[, ":=" ("2Classes" = if(median(quarterlyReturns)>=quarterlyReturns) 2 else 1, 
 #                   "4Classes" = ntile(quarterlyReturns, 4)), by = c("YearQuarter")]
 
+# View(mergedData[naics/10^4>=1, ])
+# View(mergedData[naics/10^4<=1, ])
+# mergedData = mergedData[naics/10^4>1 , naics]
+
+# #NAICS Industry split
+# mergedData$Sector = floor(mergedData$naics/10^4)
+# mergedData$Subsector = floor(mergedData$naics/10^3)
+# mergedData$IndustryGroup = floor(mergedData$naics/10^2)
+# mergedData$Industry = floor(mergedData$naics/10)
+# mergedData$NationalIndustry = mergedData$naics
+
+mergedData$Sector = as.numeric(substr(mergedData$naics, 1, 2))
+mergedData$Subsector = as.numeric(substr(mergedData$naics, 1, 3))
+mergedData$IndustryGroup = as.numeric(substr(mergedData$naics, 1, 4))
+mergedData$Industry = as.numeric(substr(mergedData$naics, 1, 5))
+mergedData$NationalIndustry = as.numeric(substr(mergedData$naics, 1, 6))
+# View(mergedData[1:100,])
+# 
+# factor(mergedData$Sector)
+# factor(mergedData$Subsector)
+# factor(mergedData$IndustryGroup)
+# factor(mergedData$Industry)
+# factor(mergedData$NationalIndustry)
+# 
+# table(mergedData$Sector)
+# table(mergedData$Subsector)
+# table(mergedData$IndustryGroup)
+# table(mergedData$Industry)
+# table(mergedData$NationalIndustry)
+
+
+# View(mergedData[sic/10^2>=1, ])
+# View(mergedData[sic/10^2<=1, ])
+# mergedData = mergedData[sic/10^2>1 , sic]
+# View(mergedData[, c("sic")])
+# 
+# #SIC Industry split
+# mergedData$Industry = floor(mergedData$sic/10^2)
+# mergedData$Group = floor(mergedData$sic/10)
+# mergedData$Division = mergedData$sic
+
+
 ```
 
 
@@ -902,15 +966,18 @@ mergedData[, ":=" ("2Classes" = ntile(quarterlyReturns, 2),
 # #Removing Unnecessary variables 
 # variableNames = c("returns", "MktCap", "gvkey", "fdateq", "datadate", "datacqtr", "accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "loc", "city", "naics", "acctstdq", "bsprq", "compstq", "scfq", "staltq")
 
-crucialNames = c("gvkey", "fdateYQ", "quarterlyReturns", "quarterlyVolatility", "MktCap", "Split")
+crucialNames = c("gvkey", "fdateYQ", "quarterlyReturns", "quarterlyVolatility", 
+                 "MktCap", "Split", "TimeDifferenceInDays")
 
-dummyNames = c("naics", "loc", "city", "acctstdq", "compstq")
+dummyNames = c("loc", "city", "acctstdq", "compstq")
+industryNames = c("Sector", "Subsector", "IndustryGroup", "Industry", "NationalIndustry")
+
 numericalNames = c("accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq")
 
 laggedVolAndRetNames = c("quarterlyReturns-1", "quarterlyReturns-2", "quarterlyReturns-3", "quarterlyReturns-4", "quarterlyVolatility-1",  "quarterlyVolatility-2", "quarterlyVolatility-3", "quarterlyVolatility-4", "past2YearReturn", "past3YearReturn", "past4YearReturn", "past5YearReturn", "past2YearVolatility", "past3YearVolatility", "past4YearVolatility", "past5YearVolatility")
 labelNames = c("2Classes", "4Classes", "6Classes", "8Classes", "10Classes")
 
-newVariableNames = c(crucialNames, dummyNames, numericalNames, laggedVolAndRetNames, labelNames)
+newVariableNames = c(crucialNames, dummyNames, industryNames, numericalNames, laggedVolAndRetNames, labelNames)
 
 # #YX = lapply(YXfactor, function(x){x[, ..variableNames]})
 # #YX = lapply(YX, function(x){na.omit(x)})
@@ -920,7 +987,7 @@ newVariableNames = c(crucialNames, dummyNames, numericalNames, laggedVolAndRetNa
 finalData = mergedData[, newVariableNames, with=F]
 colnames(finalData)[colnames(finalData) == 'quarterlyReturns'] <- 'returns'
 colnames(finalData)[colnames(finalData) == 'quarterlyVolatility'] <- 'volatility'
-#View(finalData[1:100,])
+# View(finalData[1:100,])
 
 
 # #removeMissingCalendarData. I could probably manually add these three instead. A simple script for adding
