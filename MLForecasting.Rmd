@@ -39,6 +39,130 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
+```{ WRDS SSH}
+
+wrds-cloud.wharton.upenn.edu
+username = ""
+password = ""
+
+qrsh
+R --no-save --no-restore
+
+res <- dbSendQuery(wrds, "select * 
+                   from comp.g_secd
+                   where gvkey = '005302'")
+data <- dbFetch(res, n=10)
+dbClearResult(res)
+data
+
+quit()
+logout
+
+
+```
+
+
+
+
+```{r}
+
+require(RPostgres)
+wrds <- dbConnect(Postgres(),
+                  host='wrds-pgdata.wharton.upenn.edu',
+                  port=9737,
+                  dbname='wrds',
+                  sslmode='require',
+                  user=username)
+
+
+res <- dbSendQuery(wrds, "SELECT * FROM dataset")
+#data <- dbFetch(res, n=-1)
+data <- dbFetch(res, n=10)
+dbClearResult(res)
+data
+
+
+res <- dbSendQuery(wrds, "select distinct table_schema
+                   from information_schema.tables
+                   where table_type ='VIEW'
+                   or table_type ='FOREIGN TABLE'
+                   order by table_schema")
+data <- dbFetch(res, n=-1)
+dbClearResult(res)
+data
+
+
+res <- dbSendQuery(wrds, "select distinct table_name
+                   from information_schema.columns
+                   where table_schema='comp'
+                   order by table_name")
+data <- dbFetch(res, n=-1)
+dbClearResult(res)
+data
+
+
+res <- dbSendQuery(wrds, "select column_name
+                   from information_schema.columns
+                   where table_schema='comp'
+                   and table_name='g_fundq'
+                   order by column_name")
+data <- dbFetch(res, n=-1)
+dbClearResult(res)
+data
+
+
+res <- dbSendQuery(wrds, "select * 
+                   from comp.g_fundq
+                   where gvkey = '005302'")
+data <- dbFetch(res, n=10)
+dbClearResult(res)
+data
+
+
+res <- dbSendQuery(wrds, "select * 
+                   from comp.g_secd
+                   where gvkey = '005302'")
+data <- dbFetch(res, n=10)
+dbClearResult(res)
+data
+
+
+
+
+
+res <- dbSendQuery(wrds, "select * 
+                   from comp.g_fundq")
+dataCols <- dbFetch(res, n=10)
+dbClearResult(res)
+dataCols
+
+
+
+res <- dbSendQuery(wrds, "select gvkey, datadate, ajexdi 
+                   from comp.g_secd")
+system.time(
+  #data <- dbFetch(res, n=10000000)
+  data <- dbFetch(res, n=-1)
+  )
+
+dbClearResult(res)
+data
+
+
+
+
+
+require(data.table)
+data = as.data.table(data)
+View(data[ajexdi<0.0000001, ])
+
+fwrite(data,"Data/OriginalData/CorrectAjexdi.csv", row.names = FALSE)
+data2 <- fread("Data/OriginalData/CorrectAjexdi.csv", nThread=4)
+
+
+
+```
+
 
 
 ```{r CompustatFundamentals}
@@ -50,11 +174,6 @@ knitr::opts_chunk$set(echo = TRUE)
 #Import data. The data includes both industrials and banks
 require(data.table); #setDTthreads(0L
 data <- fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=NULL)
-
-system.time(fread("Data/OriginalData/FundamentalsQuarterly.csv", select=c("naics")))
-system.time(fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=c("naics")))
-
-a = fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=c("naics"="character"))
 
 # #orderedData = data[order(names(data))]
 # #setcolorder(data, order(names(data)))
@@ -469,10 +588,20 @@ logret = function(price, returnFactor, adjustmentFactor) {
 
 require(data.table)
 # returnData = fread("Data/CleanPrices.csv")
-prices <- fread("Data/OriginalData/CompustatPrices.csv")
-returnData = prices[prices$iid == prices$prirow, -c("iid", "prirow")]
+prices <- fread("Data/OriginalData/CompustatPrices.csv", nThread = 4)
 
+# prices <- fread("Data/OriginalData/CompustatPrices.csv", nThread = 4, 
+#                 select = c("ajexdi"), colClasses=c("ajexdi"="character"), nrows=270000)[260000:270000]
+
+returnData = prices[prices$iid == prices$prirow, -c("iid", "prirow")]
 returnData[, ":=" ("adjustedPrice" = prccd * trfd / ajexdi)]
+
+#View(returnData[is.infinite(adjustedPrice), ])
+#View(prices[ajexdi==0, ])
+# keysWithInfValues = unique(returnData[is.infinite(adjustedPrice), gvkey])
+#keysWithInfValues = unique(prices[ajexdi==0, gvkey])
+# View(returnData[gvkey %in% keysWithInfValues, ])
+
 returnData[, "MktCap" := prccd * cshoc]
 returnData[, c("cshoc", "prccd", "trfd", "ajexdi"):=NULL]
 colnames(returnData)
@@ -553,6 +682,9 @@ colSums(is.na(monthlyReturnData))
 
 fwrite(monthlyReturnData,"Data/monthlyReturnData.csv", row.names = FALSE)
 
+require(data.table)
+monthlyReturnData = fread("Data/monthlyReturnData.csv")
+
 
 # quarterlyReturnData = monthlyReturnData[,c("gvkey", "datadate", "year", "quarter", "curcdd", 
 #                                            "quarterlyReturns", "quarterlyVolatility", "MktCap", "YearQuarter")]
@@ -560,18 +692,21 @@ quarterlyReturnData = unique(monthlyReturnData, by=c("gvkey", "year", "quarter")
 
 
 for(lag in 1:4){
-  quarterlyReturnData[, paste("quarterlyReturns", lag, sep = "-") := c(rep(NA, min(lag, length(quarterlyReturns))), 
+  quarterlyReturnData[, paste0("quarterlyReturnsLagged", lag, "Q") := c(rep(NA, min(lag, length(quarterlyReturns))), 
                                                                        head(quarterlyReturns, -lag)), by = gvkey]
   
-  quarterlyReturnData[, paste("quarterlyVolatility", lag, sep = "-") := c(rep(NA, min(lag, length(quarterlyVolatility))),
+  quarterlyReturnData[, paste0("quarterlyVolatilityLagged", lag, "Q") := c(rep(NA, min(lag, length(quarterlyVolatility))),
                                                                           head(quarterlyVolatility, -lag)), by = gvkey]
   print(lag)
 }
 
 
 for(lag in 2:5){
-  quarterlyReturnData[, paste0("past", lag, "YearReturn") 
-                      := (Reduce(`*`, shift(quarterlyReturns/100 + 1, 0:(lag*4), type="lag")) - 1)*100, by = gvkey][]
+  quarterlyReturnData[, paste0("past", lag, "YearReturn")
+                      := (Reduce(`*`, shift(quarterlyReturns/100 + 1, 1:(lag*4), type="lag")) - 1)*100, by = gvkey][]
+  
+  quarterlyReturnData[, paste0("yearlyReturnsLagged", lag-1, "Y") 
+                      := (Reduce(`*`, shift(quarterlyReturns/100 + 1, (1 + (lag-1)*4):(lag*4), type="lag")) - 1)*100, by = gvkey][]
   
   quarterlyReturnData[, paste0("past", lag, "YearVolatility") 
                       := c(NA, RcppRoll::roll_sd(quarterlyReturns[-length(quarterlyReturns)]/100, 
@@ -580,9 +715,15 @@ for(lag in 2:5){
                       by = gvkey][]
   print(lag)
 }
+
 #View(quarterlyReturnData[1:5000,])
 
-#fwrite(quarterlyReturnData,"Data/returnsData.csv", row.names = FALSE)
+#View(quarterlyReturnData[1:5000,c("quarterlyReturns", "yearlyReturnsLagged2Y", "past2YearVolatility")])
+
+prod(quarterlyReturnData[3:6]$"quarterlyReturns"/100 + 1) -1
+sd(quarterlyReturnData[1:4]$"quarterlyReturns"/100)*sqrt(252)
+
+fwrite(quarterlyReturnData,"Data/returnsData.csv", row.names = FALSE)
 
 
 
@@ -600,8 +741,9 @@ for(lag in 2:5){
 ```{r combineFundamentalsAndPricesNewVersion}
 
 require(data.table)
-returnData <- fread("Data/returnsData.csv")
-cleanData <- fread("Data/CleanDataQ.csv")
+returnData <- fread("Data/returnsData.csv", nThread=4)
+#cleanData <- fread("Data/CleanDataQ.csv", nThread=4)
+cleanData <- fread("Data/OriginalData/FundamentalsQuarterly.csv", nThread=4, select=NULL)
 #View(returnData[1:100,])
 
 #Remove firms with large fdateq-datadate discrepancy
@@ -625,11 +767,19 @@ setkey(cleanData, gvkey, year, quarter)
 #Does this remove the data with the largest date gaps? (Between fdateq and datadate)
 fundamentalsData = unique(cleanData, fromLast=T, by = key(cleanData))
 mean(as.numeric(cleanData$TimeDifferenceInDays)); mean(as.numeric(fundamentalsData$TimeDifferenceInDays));
+mean(as.numeric(cleanData$TimeDifferenceInDays), na.rm = T); mean(as.numeric(fundamentalsData$TimeDifferenceInDays), na.rm = T);
 
-#View(fundamentalsData[1:1000,])
+#View(fundamentalsData[1:100,])
 #tail(sort(fundamentalsData$TimeDifferenceInDays), 50)
+#hist(as.numeric(fundamentalsData$TimeDifferenceInDays), breaks=100)
+#hist(as.numeric(fundamentalsData[TimeDifferenceInDays<100,]$TimeDifferenceInDays), breaks=100)
+#fundamentalsData = fundamentalsData[TimeDifferenceInDays<250,]
 fundamentalsData = fundamentalsData[TimeDifferenceInDays<100,]
 #hist(as.numeric(fundamentalsData$TimeDifferenceInDays), breaks=100)
+sum(is.na(cleanData$TimeDifferenceInDays)); sum(is.na(fundamentalsData$TimeDifferenceInDays))
+#View(fundamentalsData[TimeDifferenceInDays<1, ])
+#hist(as.numeric(fundamentalsData[TimeDifferenceInDays<10,]$TimeDifferenceInDays), breaks=30)
+
 
 #Combine datasets
 setkey(fundamentalsData, gvkey, year, quarter)
@@ -637,12 +787,13 @@ setkey(returnData, gvkey, year, quarter)
 
 mergedData = merge(returnData, fundamentalsData, 
                    by = c("gvkey", "year", "quarter"),
-                   suffixes = c(".price", ".fund"))
+                   suffixes = c("_price", "_fund"))
 #View(mergedData[1:1000,])
+#View(mergedData[curcdd!=curcdq, ])
 
-mergedData = mergedData[curcdd==curcdq, !c("curcdd", "curcdq")]
+mergedData = mergedData[curcdd==curcdq, ]
 
-fwrite(mergedData, "Data/mergedData.csv", row.names = FALSE)
+fwrite(mergedData, "Data/mergedDataLarge.csv", row.names = FALSE) #, nThread=4
 
 ```
 
@@ -732,6 +883,23 @@ dim(table(cleanData[,c("gvkey")]))
 
 ```
 
+```{r DataImputation}
+
+sort(colSums(!is.na(mergedData)))
+View(mergedData[1:20,])
+
+table(mergedData$xcomq)
+
+require(mice)
+require(missForest)
+
+
+
+
+
+```
+
+
 
 ```{r ImportHereAndFactorize}
 
@@ -800,22 +968,22 @@ factorCols = c("gvkey", "fdateYQ", "Split", "naics", "loc", "city",
 
 
 require(data.table)
-mergedData <- fread("Data/mergedData.csv")
-View(mergedData[1:100,])
+#mergedData <- fread("Data/mergedData.csv")
+mergedData <- fread("Data/mergedDataLarge.csv", nThread=4)
+#View(mergedData[1:100,])
 
-factor(mergedData$naics)
-factor(mergedData$sic)
-table(mergedData$naics)
-table(mergedData$sic)
+# factor(mergedData$naics)
+# factor(mergedData$sic)
+# table(mergedData$naics)
+# table(mergedData$sic)
 # sum(is.na(mergedData$naics))
 # sum(is.na(mergedData$sic))
 # colSums(is.na(mergedData))
 
-mergedData = na.omit(mergedData)
-
 mergedData$fdateYQ = paste(mergedData$year, mergedData$quarter, sep="Q")
 mergedData$fdateYQ = zoo::as.yearqtr(mergedData$fdateYQ, format="%YQ%q")
 
+#mergedData = na.omit(mergedData)
 
 startQuarter = min(mergedData$fdateYQ)
 endQuarter = max(mergedData$fdateYQ)
@@ -852,7 +1020,7 @@ splitFrequencies = format(splitFrequencies[,c("Train", "Validation", "Test")],
                           scientific = FALSE, trim=T, zero.print =F,  drop0trailing=T)
 splitFrequencies
 
-fwrite(mergedData,"Data/mergedDataWithSplit.csv", row.names = FALSE)
+fwrite(mergedData, "Data/mergedDataWithSplitLarge.csv", row.names = FALSE)
 
 ```
 
@@ -878,6 +1046,14 @@ ggplot(data = mergedData, aes(x = fdateYQ, fill = Split)) +
   zoo::scale_x_yearqtr(format = '%Y', n = years) +
   scale_fill_discrete(breaks=c('Train', 'Validation', 'Test'))
 
+# ggplot(data = mergedData, aes(x = datacqtr, fill = Split)) +
+#   geom_bar(stat = "count") +
+#   labs(title = "Train-Validation-Test Quarterly Split",
+#        subtitle = dataRange, 
+#        x = "Quarter", y = "Observations") + 
+#   zoo::scale_x_yearqtr(format = '%Y', n = years) +
+#   scale_fill_discrete(breaks=c('Train', 'Validation', 'Test'))
+
 ggsave(filename=paste0("Descr/DescrFigures/TrainValidationTestQuarterlyPlot_", Sys.Date(), ".png"),
        device="png")
 
@@ -900,7 +1076,23 @@ ggsave(filename=paste0("Descr/DescrFigures/TrainValidationTestQuarterlyPlot_", S
 
 ```{r EncodingForClassification}
 require(data.table)
-mergedData <- fread("Data/mergedDataWithSplit.csv")
+#mergedData <- fread("Data/mergedDataWithSplit.csv")
+mergedData <- fread("Data/mergedDataWithSplitLarge.csv", nThread=4)
+
+
+#mergedData[is.infinite(mergedData)]
+mergedData[is.infinite(rowSums(mergedData[, laggedVolAndRetNames, with=F])), laggedVolAndRetNames, with=F]
+
+lapply(mergedData[, laggedVolAndRetNames, with=F], function(x) x[is.infinite(x)])
+
+mergedData[, laggedVolAndRetNames, with=F][Reduce(`&`, lapply(mergedData[, laggedVolAndRetNames, with=F], is.infinite)),]
+
+View(mergedData[, c("returns", "prccd", "trfd", "ajexdi", "adjustedPrice", laggedVolAndRetNames), with=F][
+                  rowSums(
+                    sapply(
+                      mergedData[, c("returns", "prccd", "trfd", "ajexdi", "adjustedPrice", laggedVolAndRetNames), with=F], 
+                                 is.infinite)) > 0, ])
+
 
 #EncodingForClassification
 require(dplyr)
@@ -952,7 +1144,7 @@ mergedData$Subsector = as.numeric(substr(mergedData$naics, 1, 3))
 mergedData$IndustryGroup = as.numeric(substr(mergedData$naics, 1, 4))
 mergedData$Industry = as.numeric(substr(mergedData$naics, 1, 5))
 mergedData$NationalIndustry = as.numeric(substr(mergedData$naics, 1, 6))
-View(mergedData[1:100,])
+#View(mergedData[1:100,])
 # 
 # factor(mergedData$Sector)
 # factor(mergedData$Subsector)
@@ -977,13 +1169,18 @@ View(mergedData[1:100,])
 # mergedData$Group = floor(mergedData$sic/10)
 # mergedData$Division = mergedData$sic
 
-
 ```
 
 
 ```{r removingExtraVariables}
-#View(mergedData[1:1000,])
 
+require(data.table)
+originalVariableNames <- colnames(fread("Data/OriginalData/FundamentalsQuarterly.csv", nrows=0, drop=c("datadate")))
+allVariableNames = colnames(mergedData)
+allVariableNames[!allVariableNames  %in% originalVariableNames]
+# originalVariableNames[!originalVariableNames  %in% allVariableNames]
+
+#View(mergedData[1:1000,])
 
 # #Removing Unnecessary variables 
 # variableNames = c("returns", "MktCap", "gvkey", "fdateq", "datadate", "datacqtr", "accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq", "loc", "city", "naics", "acctstdq", "bsprq", "compstq", "scfq", "staltq")
@@ -996,12 +1193,37 @@ industryNames = c("Sector", "Subsector", "IndustryGroup", "Industry", "NationalI
 
 numericalNames = c("accdq", "acoq", "acoxq", "actq", "ancq", "aoq", "apq", "atq", "capsq", "ceqq", "cheq", "cogsq", "cstkq", "dfxaq", "dlcq", "dlttq", "dpq", "eqrtq", "eroq", "gpq", "ibmiiq", "ibq", "iditq", "intanq", "invtq", "ivaoq", "lcoq", "lcoxq", "lctq", "lltq", "loq", "lseq", "ltmibq", "ltq", "nopioq", "nopiq", "oiadpq", "oibdpq", "piq", "ppentq", "reccoq", "rectoq", "rectq", "rectrq", "req", "revtq", "saleq", "sctq", "seqq", "teqq", "txtq", "xintq", "xoproq", "xoprq", "xsgaq")
 
-laggedVolAndRetNames = c("quarterlyReturns-1", "quarterlyReturns-2", "quarterlyReturns-3", "quarterlyReturns-4", "quarterlyVolatility-1",  "quarterlyVolatility-2", "quarterlyVolatility-3", "quarterlyVolatility-4", "past2YearReturn", "past3YearReturn", "past4YearReturn", "past5YearReturn", "past2YearVolatility", "past3YearVolatility", "past4YearVolatility", "past5YearVolatility")
+numericalNames2 = c("accoq", "adpacq", "amq",
+ "aotq", "apoq", "artfsq", "autxrq", "bcefq", "bctq", "bdiq", "capcstq", "capr1q", "capr2q",
+ "capr3q", "caq", "cfbdq", "cfereq", "cfoq", "cfpdoq", "chq", "chsq", "cltq", "dfpacq",
+ "ditq", "dpactq", "dptbq", "dptcq", "dvpdpq", "dvrreq", "dvtq", "esubq", "fcaq", "feaq",
+ "felq", "gdwlamq", "gdwlq", "iatiq", "ibkiq", "iireq", "iitq", "intcq", "iobdq", "ioiq",
+ "ioreq", "ipq", "iptiq", "isgtq", "istq", "ivaeqq", "iviq", "ivptq", "ivstq", "ivtfsq",
+ "lcabgq", "lcacuq", "lsq", "mibnq", "mibq", "mibtq", "miiq", "mtlq", "nitq", "oproq",
+ "pclq", "prcq", "pstkq", "ptranq", "pvoq", "pvtq", "ratiq", "rawmsmq", "reitq", "risq",
+ "rltq", "rvlrvq", "rvtiq", "rvutxq", "saaq", "salq", "sbdcq", "scoq", "scq", "spiq",
+ "ssnpq", "stkchq", "tdsgq", "tdstq", "transaq", "tstkq", "txdbq", "unnpq", "xagtq", "xbdtq",
+ "xcomiq", "xcomq", "xdvreq", "xioq", "xiq", "xiviq", "xivreq", "xobdq", "xoiq", "xoreq",
+ "xppq", "xretq", "xsq", "xstoq", "xstq", "xtq")
+
+laggedVolAndRetNames = c("quarterlyReturnsLagged1Q", "quarterlyReturnsLagged2Q", "quarterlyReturnsLagged3Q", "quarterlyReturnsLagged4Q", 
+                         #"quarterlyReturns-1", "quarterlyReturns-2", "quarterlyReturns-3", "quarterlyReturns-4", 
+                         "quarterlyVolatilityLagged1Q",  "quarterlyVolatilityLagged2Q", "quarterlyVolatilityLagged3Q", "quarterlyVolatilityLagged4Q", 
+                         #"quarterlyVolatility-1",  "quarterlyVolatility-2", "quarterlyVolatility-3", "quarterlyVolatility-4", 
+                         "yearlyReturnsLagged1Y", "yearlyReturnsLagged2Y", "yearlyReturnsLagged3Y", "yearlyReturnsLagged4Y", 
+                          "past2YearReturn", "past3YearReturn", "past4YearReturn", "past5YearReturn", 
+                         "past2YearVolatility", "past3YearVolatility", "past4YearVolatility", "past5YearVolatility")
 
 labelNames = c("2Classes", "4Classes", "6Classes", "8Classes", "10Classes", 
                "Simple2Classes", "Simple4Classes", "Simple6Classes", "Simple8Classes", "Simple10Classes")
 
 newVariableNames = c(crucialNames, dummyNames, industryNames, numericalNames, laggedVolAndRetNames, labelNames)
+
+# newVariableNames[!newVariableNames  %in% originalVariableNames]
+# originalVariableNames[!originalVariableNames  %in% newVariableNames]
+
+newVariableNames = c(newVariableNames, numericalNames2)
+newVariableNames = newVariableNames[!duplicated(newVariableNames)]
 
 # #YX = lapply(YXfactor, function(x){x[, ..variableNames]})
 # #YX = lapply(YX, function(x){na.omit(x)})
@@ -1024,8 +1246,8 @@ colnames(finalData)[colnames(finalData) == 'quarterlyVolatility'] <- 'volatility
 # YX[,"gvkey"] = apply(YX[,"gvkey"], MARGIN = 2, factor)
 
 
-fwrite(finalData,"Data/YX.csv", row.names = FALSE)
-
+fwrite(finalData,"Data/YXLarge.csv", row.names = FALSE)
+#fwrite(finalData,"Data/YX.csv", row.names = FALSE)
 
 #Histogram
 #revenueWinsorized = DescTools::Winsorize(finalData$revtq/finalData$MktCap, probs = c(0.01, 0.99))
@@ -1872,19 +2094,26 @@ write.csv(quarterlyFactors, "FactorData/quarterlyFactors.csv", row.names = FALSE
 
 ```{r LoadKerasModelFromPython}
 
-fs::dir_tree("Results/BestKerasModel1")
+fs::dir_tree("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel1")
 
 #library(tensorflow)
 library(keras)
 
+# target = "['returns']"
+# models = c()
+# for(n in 1:5){
+#   model <- keras::load_model_tf(sprintf("Results/%s/Ordinary/SavedKerasModels/BestKerasModel%s", target, n))
+#   models = c(models, model)
+# }
 
-model <- keras::load_model_tf('Results/BestKerasModel1')
-model2 <- keras::load_model_tf('Results/BestKerasModel2') #load second best model
-model3 <- keras::load_model_tf('Results/BestKerasModel3') #load third best model
-StandardLinearModel <- keras::load_model_tf('Results/KerasLinearModel') #load linear model
+model <- keras::load_model_tf(paste0("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel", n))
+model2 <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel2") #load second best model
+model3 <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel3") #load third best model
+StandardLinearModel <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/KerasLinearModel") #load linear model
 
 # Check its architecture
-summary(model)
+#summary(models[[1]])
+summary(model1)
 summary(model2)
 summary(model3)
 
@@ -1947,6 +2176,10 @@ library(keras) #Contains "keras_model_sequential" function
 # YXfactor$city = factor(YXfactor$city)
 
 testSet = YXfactor[YXfactor$Split=="Test",-c("MktCap", "Split")]#, "staltq")]#, "staltq", "bsprq", "scfq")]
+
+
+# c(crucialNames, dummyNames, industryNames, numericalNames, laggedVolAndRetNames, labelNames, numericalNames2)
+
 #testSet$fdateYQ = factor(testSet$fdateYQ)
 #View(as.data.frame(colnames(YXfactor)))
 
@@ -2478,6 +2711,30 @@ optimalPortfoliosWithRealized = optimalPortfoliosWithRealized[, ":=" ("equalWeig
 #NaiveMeanModel: Above script with R = mean
 
 #NaiveFirmMeanModel: Above script with R = mean_n
+
+
+
+```
+
+
+```{r Classification porfolios}
+
+
+# targets = c("['2Classes']", "['4Classes']", "['6Classes']", "['8Classes']", "['10Classes']")
+# allModels = c()
+# for(x in targets){
+#   models = c()
+#   for(n in 1:3){
+#     path = sprintf("Results/%s/Ordinary/SavedKerasModels/BestKerasModel%s", x, n)
+#     fs::dir_tree(path)
+#     model <- keras::load_model_tf(path, custom_objects = list("MDA": MDA))
+#     models = c(models, model)
+#   }
+#   StandardLinearModel <- keras::load_model_tf(sprintf("Results/%s/Ordinary/SavedKerasModels/KerasLinearModel", x))
+#   models = c(models, model)
+#   allModels = cbind(allModels, models)
+#   }
+# colnames(models) = target
 
 
 
