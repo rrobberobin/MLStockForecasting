@@ -2106,7 +2106,7 @@ library(keras)
 #   models = c(models, model)
 # }
 
-model <- keras::load_model_tf(paste0("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel", n))
+model1 <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel1")
 model2 <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel2") #load second best model
 model3 <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/BestKerasModel3") #load third best model
 StandardLinearModel <- keras::load_model_tf("Results/['returns']/Ordinary/SavedKerasModels/KerasLinearModel") #load linear model
@@ -2117,7 +2117,7 @@ summary(model1)
 summary(model2)
 summary(model3)
 
-bestModels = list(model, model2, model3)
+bestModels = list(model1, model2, model3)
 
 # #Model Fitting
 # mymodel <- model %>%
@@ -2178,6 +2178,18 @@ library(keras) #Contains "keras_model_sequential" function
 testSet = YXfactor[YXfactor$Split=="Test",-c("MktCap", "Split")]#, "staltq")]#, "staltq", "bsprq", "scfq")]
 
 
+
+#[numCols + dummyNames + ["Split", "fdateYQ"]]
+#remove: dependentNames + descrNames + detailedDummyNames
+descrNames = c("Split", "MktCap", "compstq")
+dependentNames = c("returns", "volatility",
+                  "2Classes", "4Classes", "6Classes", "8Classes", "10Classes",
+                  "Simple2Classes", "Simple4Classes", "Simple6Classes", "Simple8Classes", "Simple10Classes")
+detailedDummyNames = c("city", "Subsector", "IndustryGroup", "Industry", "NationalIndustry")
+
+testSet = YXfactor[YXfactor$Split=="Test",-c(descrNames, dependentNames, detailedDummyNames), with=F]
+
+
 # c(crucialNames, dummyNames, industryNames, numericalNames, laggedVolAndRetNames, labelNames, numericalNames2)
 
 #testSet$fdateYQ = factor(testSet$fdateYQ)
@@ -2210,7 +2222,8 @@ for(q in quarters){
   
   cat("Quarter: ", q)
   test = testSet[testSet$fdateYQ==q, ]
-  testX = as.matrix(test[,!c("returns", "fdateYQ", "gvkey")])
+  #testX = as.matrix(test[,!c("returns", "fdateYQ", "gvkey")])
+  testX = as.matrix(test[,!c("fdateYQ", "gvkey")])
   testY = test$returns
   
   modelPerformance = as.data.frame(lapply(bestModels, function(x) x %>% evaluate(testX, testY))) #verbose=F
@@ -2579,13 +2592,15 @@ for(n in 1:length(returnMatrix[Split=="Test"]$fdateYQ)) {
   #V = invList[[n]]
   V = CovMatFunction(q); cat(q, "CovMat", "\n");
   VColNames = colnames(V); VRowNames = rownames(V);
-  V = MASS::ginv(V); cat(q, "CovMat inverted", "\n");
-  colnames(V) = VColNames; rownames(V) = VRowNames
+  #invV = MASS::ginv(V); cat(q, "CovMat inverted", "\n"); #solve and ginv give the same results. I think
+  invV = solve(V); cat(q, "CovMat inverted", "\n");
+  colnames(invV) = VColNames; rownames(invV) = VRowNames
   
-  ER = predsFactorsMerged[fdateYQ == q & gvkey %in% colnames(V), c("NNER", "SecondER", "ThirdER", 
+  ER = predsFactorsMerged[fdateYQ == q & gvkey %in% colnames(invV), c("NNER", "SecondER", "ThirdER", 
                                                                    "ZeroER", "firmMeanER", "MeanER", 
                                                                    "gvkey", "fdateYQ")]
   V = V[rownames(V) %in% ER$gvkey, colnames(V) %in% ER$gvkey]
+  invV = invV[rownames(invV) %in% ER$gvkey, colnames(invV) %in% ER$gvkey]
   
   #check correct order
   #as.character(eR$gvkey) == colnames(V)
@@ -2593,18 +2608,32 @@ for(n in 1:length(returnMatrix[Split=="Test"]$fdateYQ)) {
   er = as.matrix(ER[,c("NNER", "SecondER", "ThirdER", 
                        "ZeroER", "firmMeanER", "MeanER")])
   #Optimal tangency formula
-  numerator = V %*% er
-  denominator = rep(1, nrow(V)) %*% V %*% er
+  numerator = invV %*% er
+  denominator = rep(1, nrow(invV)) %*% invV %*% er
   weight = sweep(numerator, 2, denominator, `/`)
-  colnames(weight) = c("NNWeights", "ThirdER", "ZeroER", 
+
+  colnames(weight) = c("NNWeights", "SecondNNWeights", "ThirdNNWeights",
                        "ZeroWeights", "firmMeanWeights", "MeanWeights")
   
-  ER = cbind(ER[, c("gvkey", "fdateYQ")], weight)
+  
+  ###Robin: check this:
+  expectedPortfolioVariance = t(weight[,1]) %*% V %*% weight[,1]
+  expectedPortfolioReturn = t(weight[,1]) %*%  er[,1]
+  sharpe = expectedPortfolioReturn / sqrt(expectedPortfolioVariance)
+  print(c(sharpe, expectedPortfolioReturn, sqrt(expectedPortfolioVariance)))
+  # a = MASS::ginv(V)
+  # b = solve(V)
+  # ###
+  
+  #ER = cbind(ER[, c("gvkey", "fdateYQ")], weight)
+  ER = cbind(ER, weight)
   optimalPortfolios = rbind(optimalPortfolios, ER)
   cat(q, "Optimal portfolio calculated", "\n")
   
-  print(colSums(optimalPortfolios[,c("NNWeights", "ThirdER", "ZeroER", 
+  print(colSums(optimalPortfolios[,c("NNWeights", "SecondNNWeights", "ThirdNNWeights",
                              "ZeroWeights", "firmMeanWeights", "MeanWeights")], na.rm = T))
+  # print(colSums(optimalPortfolios[,c("NNWeights", "ThirdER", "ZeroER", 
+  #                            "ZeroWeights", "firmMeanWeights", "MeanWeights")], na.rm = T))
   cat("\n", "\n")
 }
 
@@ -2612,6 +2641,22 @@ for(n in 1:length(returnMatrix[Split=="Test"]$fdateYQ)) {
 
 #Check
 unlist(lapply(weights, sum))
+
+
+optimalPortfolios[, list(sum(NNER * NNWeights), 
+                         sum(SecondER * SecondNNWeights),
+                         sum(ThirdER * ThirdNNWeights)
+                         ), by=fdateYQ]
+#optimalPortfolios[, sum(NNER * NNWeights) / sum(volas * NNWeights), by=fdateYQ]
+
+
+# for(n in allPortfolios){
+#   name = paste0(n, "ExcpectedSharpe")
+#   excessReturns = paste0(n, "ER")
+#   volas = paste0(n, "Vola")
+#   optimalPortfoliosWithRealized[, ":=" (name = sum(excessReturns * NNWeights) / sum(volas * NNWeights)), by=fdateYQ]
+# }
+
 
 #}################################################################
 #sharpeMaximizingWeights()
@@ -2686,6 +2731,217 @@ optimalPortfoliosWithRealized = merge(optimalPortfolios, monthlyReturns, by = c(
 
 ```
 
+```{r SharpeMaximization using PortfolioAnalytics}
+#LP, QP, or Numerical methods
+#https://rdrr.io/cran/PortfolioAnalytics/src/demo/demo_max_Sharpe.R
+require(PortfolioAnalytics)
+require(data.table)
+q=2022.5
+q=2020.75
+
+quarterlyReturnData = fread("Data/returnsData.csv", nThread = 4)
+RAll = dcast.data.table(data=quarterlyReturnData, YearQuarter~gvkey, value.var="quarterlyReturns")
+#View(RAll[1:10, 1:10])
+
+# monthlyReturnData = fread("Data/monthlyReturnData.csv", nThread = 4)
+# RAll = dcast.data.table(data=monthlyReturnData, YearQuarter~gvkey, value.var="monthlyReturns")
+
+
+optimalWeights = function(q){
+  R = as.data.frame(RAll)[-1, ]
+  #R = returnMatrix[fdateYQ < q,]
+  #rownames(R) = returnMatrix[fdateYQ < q,]$fdateYQ
+  #R = subset(R, select = -c(fdateYQ, Split))
+  R = R[R$YearQuarter < q & R$YearQuarter>=1985.75,]
+  
+  # #remove NA values?
+  # forecastQ = RAll[RAll$YearQuarter == q, ]
+  # forecastQ = unlist(forecastQ)
+  # #forecastQ
+  # 
+  # forecastQ = na.omit(forecastQ)
+  # forecastQ = names(forecastQ)
+  # R = R[ , forecastQ]
+  
+  
+  qPreds = allPreds[fdateYQ==q, ]
+  R = R[ , colnames(R) %in% c(qPreds$gvkey, "YearQuarter")]
+  
+  
+  R = R[rowSums(is.na(R)) < ncol(R), colSums(is.na(R)) < nrow(R)]
+  # R = R[rowSums(is.na(R)) < ncol(R)/5+1, colSums(is.na(R)) < nrow(R)/5+1]
+  R = R[rowSums(is.na(R)) < ncol(R)/5+1, ]
+  R = R[, colSums(is.na(R)) < nrow(R)/5+1]
+  # R = R[, colSums(is.na(R)) < 1]
+  R = R[rowSums(is.na(R)) == 0, colSums(is.na(R)) == 0]
+  
+  rownames(R) = R$YearQuarter
+  R = zoo::zoo(subset(R, select = -c(YearQuarter)), order.by=zoo::as.yearqtr(R$YearQuarter, ))
+  #R = xts(subset(R, select = -c(YearQuarter)), order.by=zoo::as.yearqtr(R$YearQuarter))
+  #R = subset(R, select = -c(YearQuarter))
+  
+  #R = as.matrix(R)
+  #R = as.ts(R)
+  #View(R[, 1:100])
+  
+  
+  
+  
+  # View(RAll[, 1:100])
+  #View(R[, 1:100])
+  #R = R[gvkey %in% allPreds$gvkey]
+  #R = na.omit(R)
+  #R = R[, 1:100]
+  finalR = R
+  #finalR = R[, 1:70]
+  
+  assets = names(finalR)
+  #search_size = 2000
+  search_size = 5
+  
+  init.portf <- portfolio.spec(assets=assets)
+  init.portf <- add.constraint(portfolio=init.portf, type="full_investment")
+  init.portf <- add.objective(portfolio=init.portf, type="return", name="mean") #change this objective to expected returns
+  init.portf <- add.objective(portfolio=init.portf, type="risk", name="StdDev")
+  init.portf.lo <- add.constraint(portfolio=init.portf, type="long_only")
+  
+  init.portf.rp = init.portf
+  init.portf.rp$constraints[[1]]$min_sum=0.99
+  init.portf.rp$constraints[[1]]$max_sum=1.01
+  
+  
+  init.portf.lo.rp = init.portf.lo
+  init.portf.lo.rp$constraints[[1]]$min_sum=0.99
+  init.portf.lo.rp$constraints[[1]]$max_sum=1.01
+  
+  
+  # qPreds = allPreds[fdateYQ==q, ]
+  # finalR = R[ , qPreds$gvkey]
+  
+  my.covariance.matrix = cov(finalR)
+  
+  expected.returns = qPreds[gvkey %in% colnames(finalR), ]
+  rownames(expected.returns) = expected.returns$gvkey
+  #View(as.matrix(expected.returns))
+  #View(my.covariance.matrix)
+  
+  
+  num_assets = ncol(finalR)
+  momentargs = list()
+  momentargs$sigma = my.covariance.matrix
+  # momentargs$m3 = matrix(0, nrow = num_assets, ncol = num_assets ^ 2)
+  # momentargs$m4 = matrix(0, nrow = num_assets, ncol = num_assets ^ 3)
+  momentargs$m3 = 0
+  momentargs$m4 = 0
+  
+  
+  res = c()
+  for(n in c("BestModelPred", "SecondModelPred", "ThirdModelPred")){
+  momentargs$mu = expected.returns[ , n, with=F][[1]]
+  maxSR.lo.RP.NN <- optimize.portfolio(R=finalR, portfolio=init.portf.lo.rp, momentargs = momentargs,
+                                   optimize_method="random",
+                                   maxSR=TRUE, trace=TRUE, search_size = search_size)
+  maxSR.lo.RP.NN
+  
+  # maxSR.lo.ROI.NN <- optimize.portfolio(R=finalR, portfolio=init.lo.portf, momentargs = momentargs,
+  #                                  optimize_method="ROI",
+  #                                  maxSR=TRUE, trace=TRUE, search_size = search_size)
+  # maxSR.lo.ROI.NN
+  #chart.Weights(maxSR.lo.RP.NN)
+  expectedSharpe = maxSR.lo.RP.NN$objective_measures$mean / maxSR.lo.RP.NN$objective_measures$StdDev
+  print(expectedSharpe)
+  
+  res = cbind(res, maxSR.lo.RP.NN$weights)
+  }
+  
+  colnames(res) = c("NNWeightsNumerical1", "NNWeightsNumerical2", "NNWeightsNumerical3")
+  resWithKeys = cbind(res, 
+        "gvkey"=as.numeric(names(maxSR.lo.RP.NN$weights)), 
+        "fdateYQ"=rep(q, length(maxSR.lo.RP.NN$weights)))
+  
+  resWithKeys
+}
+
+optimalPortfoliosFromPortfolioAnalytics = c()
+system.time(
+for(n in 1:length(returnMatrix[Split=="Test"]$fdateYQ)) {
+  q = returnMatrix[Split=="Test"]$fdateYQ[n];
+  print(q)
+  newQWeights = optimalWeights(q)
+  #optimalPortfoliosFromPortfolioAnalytics = rbind(optimalPortfoliosFromPortfolioAnalytics, c(newQWeights, "fdateYQ"=q))
+  optimalPortfoliosFromPortfolioAnalytics = rbind(optimalPortfoliosFromPortfolioAnalytics, newQWeights)
+}
+)
+
+optimalPortfoliosWithRealized = merge(optimalPortfoliosWithRealized, optimalPortfoliosFromPortfolioAnalytics, by = c("gvkey", "fdateYQ"), all=T)
+
+# 
+# 
+# 
+# init.portf
+# init.portf.lo
+# init.portf.rp
+# init.portf.lo.rp
+# 
+# 
+# maxSR.ROI <- optimize.portfolio(R=finalR, portfolio=init.portf, 
+#                                    optimize_method="ROI", 
+#                                    maxSR=TRUE, trace=TRUE, search_size = search_size)
+# maxSR.ROI
+# chart.Weights(maxSR.ROI)
+# 
+# 
+# maxSR.lo.ROI <- optimize.portfolio(R=finalR, portfolio=init.portf.lo, 
+#                                    optimize_method="ROI", 
+#                                    maxSR=TRUE, trace=TRUE, search_size = search_size)
+# maxSR.lo.ROI
+# chart.Weights(maxSR.lo.ROI)
+# #chart.EfficientFrontier(maxSR.lo.ROI, match.col = "StdDev", n.portfolios = 5)#, xlim = c(0, 30), ylim = c(0, 10))
+# 
+# 
+# 
+# 
+# 
+# 
+# 
+# maxSR.ROI.NN <- optimize.portfolio(R=finalR, portfolio=init.portf, momentargs = momentargs,
+#                                    optimize_method="ROI", 
+#                                    maxSR=TRUE, trace=TRUE, search_size = search_size)
+# maxSR.ROI.NN
+# chart.Weights(maxSR.ROI.NN)
+# 
+# maxSR.lo.ROI.NN <- optimize.portfolio(R=finalR, portfolio=init.portf.lo, momentargs = momentargs,
+#                                    optimize_method="ROI", 
+#                                    maxSR=TRUE, trace=TRUE, search_size = search_size)
+# maxSR.lo.ROI.NN
+# chart.Weights(maxSR.lo.ROI.NN)
+# 
+# 
+# 
+# 
+# 
+# maxSR.RP.NN <- optimize.portfolio(R=finalR, portfolio=init.portf.rp, momentargs = momentargs,
+#                                    optimize_method="random",
+#                                    maxSR=TRUE, trace=TRUE, search_size = 200)
+# maxSR.RP.NN
+# chart.Weights(maxSR.RP.NN)
+# 
+# 
+# maxSR.lo.RP.NN <- optimize.portfolio(R=finalR, portfolio=init.portf.lo.rp, momentargs = momentargs,
+#                                    optimize_method="random",
+#                                    maxSR=TRUE, trace=TRUE, search_size = 200)
+# maxSR.lo.RP.NN
+# chart.Weights(maxSR.lo.RP.NN)
+# 
+# 
+# 
+# 
+# optimalPortfoliosWithRealized
+# maxSR.lo.RP.NN$weights
+# 
+
+
+```
 
 
 ```{r NaivePortfolios}
@@ -2720,7 +2976,7 @@ optimalPortfoliosWithRealized = optimalPortfoliosWithRealized[, ":=" ("equalWeig
 ```{r Classification porfolios}
 
 
-# targets = c("['2Classes']", "['4Classes']", "['6Classes']", "['8Classes']", "['10Classes']")
+#targets = c("['2Classes']", "['4Classes']", "['6Classes']", "['8Classes']", "['10Classes']")
 # allModels = c()
 # for(x in targets){
 #   models = c()
@@ -2738,34 +2994,155 @@ optimalPortfoliosWithRealized = optimalPortfoliosWithRealized[, ":=" ("equalWeig
 
 
 
+require(data.table)
+targets = c("['2Classes']", "['4Classes']", "['6Classes']", "['8Classes']", "['10Classes']")
+dt = NULL
+for(x in targets){
+  path = sprintf("Results/%s/Ordinary/ClassificationPredictions.csv", x)
+  newDt = fread(path)[, !c("V1", "Model3", "Model4", "Model5"), with=F]
+  
+  
+  for(n in c("Model1", "Model2", "Model3", "Model4", "Model5", "Ensemble")){
+    #colnames(newDt[, n, with=F]) = paste0(n, x)
+    setnames(newDt, n, paste0(n, x), skip_absent=T)
+  }
+  dt = c(dt, list(newDt))
+  #dt = merge(x = newDt, y = dt, by = c("gvkey", "fdateYQ"), all.x = TRUE)
+}
+
+dt = Reduce(function(...) merge(..., by= c("gvkey", "fdateYQ")), dt)
+#dt = do.call("cbind", dt)
+
+
+# df$Model1
+# colnames(df)
+# df["Model1"]
+
+for(n in colnames(dt)){
+  dt[dt[[n]]==1, paste0(n, "Weights") := 1/length(gvkey), by=fdateYQ]
+  dt[dt[[n]]==-1, paste0(n, "Weights") := -1/length(gvkey), by=fdateYQ]
+}
+
+
+# #data[, paste0("d", 1:10) := 0L]
+# for(n in colnames(dt)){
+#    set(dt, i = which(dt[[n]] ==1), j = paste0(n, "Weight"),
+#         value = 1/length(gvkey))
+# 
+#    set(dt, i = which(dt[[n]] ==-1), j = paste0(n, "Weight"),
+#         value = -1/length(gvkey))
+# }
+# 
+# 
+# dt[Model1==1, ":=" ("Model1Weight" = Model1/length(gvkey)), by=fdateYQ]
+# dt[Model1==-1, ":=" ("Model1Weight" = Model1/length(gvkey)), by=fdateYQ]
+# #dt[Model1==0, ":=" ("Model1Weight" = 0), by=fdateYQ]
+# 
+# # dt[Model2==1, ":=" ("Model2Weight" = Model2/length(gvkey)), by=fdateYQ]
+# # dt[Model2==-1, ":=" ("Model2Weight" = Model2/length(gvkey)), by=fdateYQ]
+# # #dt[Model2==0, ":=" ("Model2Weight" = 0), by=fdateYQ]
+# # 
+# # dt[Model3==1, ":=" ("Model3Weight" = Model1/length(gvkey)), by=fdateYQ]
+# # dt[Model3==-1, ":=" ("Model3Weight" = Model1/length(gvkey)), by=fdateYQ]
+# # #dt[Model3==0, ":=" ("Model3Weight" = 0), by=fdateYQ]
+
+
+
+# #dt = merge(optimalPortfoliosWithRealized, dt[, c("Model1Weight", "gvkey", "fdateYQ")], by=c("gvkey", "fdateYQ"))
+# optimalPortfoliosWithRealized[dt, on = c("gvkey", "fdateYQ"), 
+#                               Classification1Weight := i.Model1Weight]
+
+optimalPortfoliosWithRealized = merge(optimalPortfoliosWithRealized, dt, on = c("gvkey", "fdateYQ"))
+
+
+# optimalPortfoliosWithRealized[dt, on = c("gvkey", "fdateYQ"), 
+#                               ":=" (Classification1Weight = i.Model1Weight, 
+#                                     Classification2Weight = i.Model2Weight,
+#                                     Classification3Weight = i.Model3Weight)]
+
+
 ```
 
 
 
 ```{r AbnormalReturns}
 
-optimalPortfoliosWithRealized[, ":=" ("NNReturn" = NNWeights * monthlyReturns, 
-                           "ZeroReturn" = ZeroWeights * monthlyReturns,
-                           "MeanReturn" = MeanWeights * monthlyReturns,
-                           "FirmMeanReturn" = firmMeanWeights * monthlyReturns,
-                           "EWReturn" = equalWeights * monthlyReturns)]
-optimalPortfoliosWithRealized[, ":=" ("NNPortfolioReturn" = sum(NNReturn),
-                           "ZeroPortfolioReturn" = sum(ZeroReturn),
-                           "MeanPortfolioReturn" = sum(MeanReturn),
-                           "FirmMeanPortfolioReturn" = sum(FirmMeanReturn),
-                           "EWPortfolioReturn" = sum(EWReturn)), by = c("YM")]
+regressionNames = c("NN", "SecondNN", "ThirdNN",
+                  "Zero", "Mean", "firmMean", "equal")
 
-realizedPortfolios = unique(optimalPortfoliosWithRealized[, c("YM", 
-                                                   "NNPortfolioReturn", 
-                                                   "ZeroPortfolioReturn", 
-                                                   "MeanPortfolioReturn", 
-                                                   "FirmMeanPortfolioReturn", 
-                                                   "EWPortfolioReturn")], by=c("YM"))
+classificationNames = c("Model1['2Classes']", "Model2['2Classes']", "Ensemble['2Classes']", "Model1['4Classes']", "Model2['4Classes']", "Ensemble['4Classes']", "Model1['6Classes']", "Model2['6Classes']", "Ensemble['6Classes']", "Model1['8Classes']", "Model2['8Classes']", "Ensemble['8Classes']", "Model1['10Classes']", "Model2['10Classes']", "Ensemble['10Classes']")
 
-optimalPortfoliosWithRealized[, list(sum(NNWeights), 
-                                     sum(MeanWeights), 
-                                     sum(firmMeanWeights), 
-                                     sum(equalWeights)), by = c("YM")]
+allPortfolios = c(regressionNames, classificationNames)
+
+for(n in allPortfolios){
+  w = optimalPortfoliosWithRealized[[paste0(n, "Weights")]]
+  #readline(prompt="Test: ")
+  optimalPortfoliosWithRealized[, paste0(n, "Return") :=  w * monthlyReturns]
+  #optimalPortfoliosWithRealized[, paste0(n, "PortfolioReturn") :=  sum(w * monthlyReturns, na.rm = T), by = c("YM")]
+  optimalPortfoliosWithRealized[, paste0(n, "PortfolioReturn") :=  sum(get(paste0(n, "Return")), na.rm = T), by = c("YM")]
+}
+
+
+# for(n in allPortfolios){
+#   name = paste0(n, "Return")
+#   weight = paste0(n, "Weights")
+#   optimalPortfoliosWithRealized[, ":=" (name = weight * monthlyReturns)]
+# }
+
+
+# optimalPortfoliosWithRealized[, ":=" (
+#   "NNReturn" = NNWeights * monthlyReturns,
+#   "NNReturnNumerical" = NNWeightsNumerical * monthlyReturns,
+#   "SecondNNReturn" = SecondNNWeights * monthlyReturns,
+#   "ThirdNNReturn" = ThirdNNWeights * monthlyReturns,
+#   "ClassificationReturn" = Classification1Weight * monthlyReturns,
+#   "ZeroReturn" = ZeroWeights * monthlyReturns,
+#   "MeanReturn" = MeanWeights * monthlyReturns,
+#   "FirmMeanReturn" = firmMeanWeights * monthlyReturns,
+#   "EWReturn" = equalWeights * monthlyReturns
+# )]
+
+# optimalPortfoliosWithRealized[, ":=" (
+#   "NNPortfolioReturn" = sum(NNReturn),
+#   "NN2PortfolioReturn" = sum(SecondNNReturn),
+#   "NN3PortfolioReturn" = sum(ThirdNNReturn),
+#   "NNPortfolioReturnNumerical" = sum(NNReturnNumerical, na.rm = T),
+#   "ClassPortfolioReturn" = sum(ClassificationReturn, na.rm = T),
+#   "ZeroPortfolioReturn" = sum(ZeroReturn),
+#   "MeanPortfolioReturn" = sum(MeanReturn),
+#   "FirmMeanPortfolioReturn" = sum(FirmMeanReturn),
+#   "EWPortfolioReturn" = sum(EWReturn)
+# ), by = c("YM")]
+
+# realizedPortfolios = unique(optimalPortfoliosWithRealized[, c(
+#   "YM",
+#   "NNPortfolioReturn",
+#   "NN2PortfolioReturn",
+#   "NN3PortfolioReturn",
+#   "NNPortfolioReturnNumerical",
+#   "ClassPortfolioReturn",
+#   "ZeroPortfolioReturn",
+#   "MeanPortfolioReturn",
+#   "FirmMeanPortfolioReturn",
+#   "EWPortfolioReturn"
+# )], by = c("YM"))
+
+
+realizedPortfolios = unique(
+  optimalPortfoliosWithRealized[, c("YM", paste0(allPortfolios, "PortfolioReturn")), 
+                                with=F], by = c("YM"))
+
+
+optimalPortfoliosWithRealized[, list(
+  sum(NNWeights),
+  sum(SecondNNWeights),
+  sum(ThirdNNWeights),
+  sum(NNWeightsNumerical),
+  sum(Classification1Weight),
+  sum(MeanWeights),
+  sum(firmMeanWeights),
+  sum(equalWeights)
+), by = c("YM")]
 
 
 monthlyFactors=fread("FactorData/allMonthlyFactors.csv")
@@ -2773,37 +3150,90 @@ monthlyFactors$YM = zoo::as.yearmon(as.character(monthlyFactors$V1), format = "%
 
 
 factorsWithReturns = merge(realizedPortfolios, monthlyFactors, by.x = "YM", by.y="YM", all = TRUE)
-factorsWithReturns[, ":=" ("NNPortfolioER" = NNPortfolioReturn - RF.DM,
-                           "ZeroPortfolioER" = ZeroPortfolioReturn- RF.DM,
-                           "MeanPortfolioER" = MeanPortfolioReturn- RF.DM,
-                           "FirmMeanPortfolioER" = FirmMeanPortfolioReturn - RF.DM,
-                           "EWPortfolioER" = EWPortfolioReturn - RF.DM), by = c("YM")]
+# factorsWithReturns[, ":=" (
+#   "NNPortfolioER" = NNPortfolioReturn - RF.DM,
+#   "NN2PortfolioER" = NN2PortfolioReturn - RF.DM,
+#   "NN3PortfolioER" = NN3PortfolioReturn - RF.DM,
+#   "NNPortfolioNumericalER" = NNPortfolioReturnNumerical - RF.DM,
+#   "ClassPortfolioER" = ClassPortfolioReturn - RF.DM,
+#   "ZeroPortfolioER" = ZeroPortfolioReturn - RF.DM,
+#   "MeanPortfolioER" = MeanPortfolioReturn - RF.DM,
+#   "FirmMeanPortfolioER" = FirmMeanPortfolioReturn - RF.DM,
+#   "EWPortfolioER" = EWPortfolioReturn - RF.DM
+# ), by = c("YM")]
 
-NNF = `NNPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
 
-ZeroF = `ZeroPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+for(n in allPortfolios){
+  factorsWithReturns[, paste0(n, "ER") :=  get(paste0(n, "PortfolioReturn")) - RF.DM, by = c("YM")]
+}
 
-MeanF = `MeanPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
 
-FirmMeanF = `FirmMeanPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+FF6Factors = colnames(monthlyFactors[, !c("V1", "YM"), with =F])
+FF6Factors = gsub("-RF", "", FF6Factors)
+FF6Factors = gsub("\\.", "_", FF6Factors)
 
-EWF = `EWPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+colnames(factorsWithReturns) = gsub("-RF", "", colnames(factorsWithReturns))
+colnames(factorsWithReturns) = gsub("\\.", "_", colnames(factorsWithReturns))
+colnames(factorsWithReturns) = gsub("\\['", "_", colnames(factorsWithReturns))
+colnames(factorsWithReturns) = gsub("\\']", "", colnames(factorsWithReturns))
 
-NNFamaFrench = lm(NNF, data=factorsWithReturns)
-ZeroFamaFrench = lm(ZeroF, data=factorsWithReturns)
-MeanFamaFrench = lm(MeanF, data=factorsWithReturns)
-FirmMeanFamaFrench = lm(FirmMeanF, data=factorsWithReturns)
-EWFamaFrench = lm(EWF, data=factorsWithReturns)
+allPortfolios = gsub("\\['", "_", allPortfolios)
+allPortfolios = gsub("\\']", "", allPortfolios)
+
+formulas = list(); models = list()
+for(n in allPortfolios){
+  
+  f = paste(paste0(n, "ER"), "~", paste(FF6Factors, collapse=" + ")) 
+    # `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + 
+    # `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+  
+  formulas = c(formulas, list(f))
+  models = c(models, list(lm(f, data=factorsWithReturns)))
+}
+names(formulas) = paste0(allPortfolios, "F")
+names(models) = allPortfolios
+
+
+
+
+
+# NNF = `NNPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# NN2F = `NN2PortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# NN3F = `NN3PortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# NNNumericalF = `NNPortfolioNumericalER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# ClassF = `ClassPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# ZeroF = `ZeroPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# MeanF = `MeanPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# FirmMeanF = `FirmMeanPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+# 
+# EWF = `EWPortfolioER` ~ `Mkt-RF.DM` + `SMB.DM` + `HML.DM` + `RMW.DM` + `CMA.DM` + `WML.DM` + `Mkt-RF.EM` + `SMB.EM` + `HML.EM` + `RMW.EM` + `CMA.EM` + `WML.EM`
+
+# NNFamaFrench = lm(NNF, data=factorsWithReturns)
+# NN2FamaFrench = lm(NN2F, data=factorsWithReturns)
+# NN3FamaFrench = lm(NN3F, data=factorsWithReturns)
+# NNNumericalFamaFrench = lm(NNNumericalF, data=factorsWithReturns)
+# ClassFamaFrench = lm(ClassF, data=factorsWithReturns)
+# ZeroFamaFrench = lm(ZeroF, data=factorsWithReturns)
+# MeanFamaFrench = lm(MeanF, data=factorsWithReturns)
+# FirmMeanFamaFrench = lm(FirmMeanF, data=factorsWithReturns)
+# EWFamaFrench = lm(EWF, data=factorsWithReturns)
 #summary(FamaFrenchSix)
 
-#models = list(NNFamaFrench, ZeroFamaFrench, MeanFamaFrench, FirmMeanFamaFrench, EWFamaFrench)
-models = list(NNFamaFrench, MeanFamaFrench, FirmMeanFamaFrench, EWFamaFrench)
 
-#There are weight issues!!!
-#And where is risk-free return???
+
+#models = list(NNFamaFrench, ZeroFamaFrench, MeanFamaFrench, FirmMeanFamaFrench, EWFamaFrench)
+# models = list(NNFamaFrench, NN2FamaFrench, NN3FamaFrench, NNNumericalFamaFrench, ClassFamaFrench, MeanFamaFrench, FirmMeanFamaFrench, EWFamaFrench)
+
 
 #Look at the portfolio returns, Are there huge outliers?
-
+#No, the issue was in the tangency weights
 
 
 
@@ -2854,7 +3284,7 @@ VIF = as.data.frame(lapply(models, function(x) data.frame(round(car::vif(x), 2))
 colnames(VIF)=c("NNVIF", "MeanVIF", "FirmMeanVIF", "EWVIF")
 VIF1 = VIF[1]
 colnames(VIF1) = "VIF"
-write.csv(VIF1, "Results/VIF3.csv")
+write.csv(VIF1, "Results/VIF4.csv")
 
 
 
@@ -2884,16 +3314,38 @@ write.csv(VIF1, "Results/VIF3.csv")
 # plm::pwaldtest(firmFixed,firmPooled)
 
 
-diagnostics = list(c("Jarque-Bera", unlist(lapply(JB, function(x) round(x$p.value, 3)))),
-                   c("Breusch-Pagan", unlist(lapply(BP, function(x) round(x$p.value, 3)))),
-                   c("Breusch-Godfrey", unlist(lapply(BG, function(x) round(x$p.value, 3)))))
+diagnostics = list(c("test" = "Jarque-Bera", unlist(lapply(JB, function(x) round(x$p.value, 3)))),
+                   c("test" = "Breusch-Pagan", unlist(lapply(BP, function(x) round(x$p.value, 3)))),
+                   c("test" = "Breusch-Godfrey", unlist(lapply(BG, function(x) round(x$p.value, 3)))))
 
 #Export
 stargazer::stargazer(models,
                      type="text",
                      report=("vc*p"),
                      add.lines = diagnostics,
-                     out = "Results/FamaFrenchSixFactorsWithNaiveModels.html"
+                     out = "Results/FamaFrenchSixFactorsWithNaiveModels3.html"
+                     )
+
+
+regModels = models[regressionNames]
+classModels = models[setdiff(names(models), regressionNames)]
+
+regDiagnostics = lapply(diagnostics, FUN=function(x) x[c("test", regressionNames)])
+classDiagnostics = lapply(diagnostics, FUN=function(x) x[c("test", setdiff(names(models), regressionNames))])
+
+
+stargazer::stargazer(regModels,
+                     type="text",
+                     report=("vc*p"),
+                     add.lines = regDiagnostics,
+                     out = "Results/RegressionModels.html"
+                     )
+
+stargazer::stargazer(classModels,
+                     type="text",
+                     report=("vc*p"),
+                     add.lines = classDiagnostics,
+                     out = "Results/ClassificationModels.html"
                      )
 
 
@@ -2908,7 +3360,7 @@ stargazer::stargazer(models,
                      type="text",
                      report=("vc*p"),
                      se  = robustErrors,
-                     out = "Results/FamaFrenchSixFactorsWithRobustErrors.html"
+                     out = "Results/FamaFrenchSixFactorsWithRobustErrors2.html"
                      )
 
 
